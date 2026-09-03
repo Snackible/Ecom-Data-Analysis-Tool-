@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+
+db/*.duckdb
+db/*.duckdb.wal
+data/incoming/*.csv
+data/processed/*.csv
+!data/incoming/.gitkeep
+!data/processed/.gitkeep

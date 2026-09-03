@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: instamart-ads-dashboard
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run dashboard.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
+    envVars:
+      - key: DASHBOARD_PASSWORD
+        sync: false
