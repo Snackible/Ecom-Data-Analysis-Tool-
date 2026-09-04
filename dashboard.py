@@ -138,7 +138,7 @@ with st.expander("📤 Upload new CSV/Excel exports", expanded=not config.DB_PAT
             else:
                 saved_paths.append(dest)
 
-        con = duckdb.connect(str(config.DB_PATH))
+        con = config.connect_db()
         ingest.ensure_schema(con)
         any_success = False
         for path in saved_paths:
@@ -173,7 +173,7 @@ DB_VERSION = config.DB_PATH.stat().st_mtime
 
 @st.cache_data(show_spinner=False)
 def load_filter_options(version: float):
-    con = duckdb.connect(str(config.DB_PATH), read_only=True)
+    con = config.connect_db(read_only=True)
     try:
         min_date, max_date = con.execute(
             "SELECT min(metrics_date), max(metrics_date) FROM granular").fetchone()
@@ -191,7 +191,7 @@ def load_filter_options(version: float):
 def load_keywords(version: float, campaigns: tuple) -> list:
     if not campaigns:
         return []
-    con = duckdb.connect(str(config.DB_PATH), read_only=True)
+    con = config.connect_db(read_only=True)
     try:
         ph = ",".join(["?"] * len(campaigns))
         rows = con.execute(
@@ -204,13 +204,13 @@ def load_keywords(version: float, campaigns: tuple) -> list:
         con.close()
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=3)
 def load_filtered(version: float, start_date, end_date, campaigns: tuple, cities: tuple,
                    keywords: tuple) -> pd.DataFrame:
     # Filtering happens in DuckDB (a columnar engine built for exactly this),
     # not by loading all rows into pandas and boolean-masking them - only the
     # rows that survive the filter ever reach Python.
-    con = duckdb.connect(str(config.DB_PATH), read_only=True)
+    con = config.connect_db(read_only=True)
     try:
         campaign_ph = ",".join(["?"] * len(campaigns))
         city_ph = ",".join(["?"] * len(cities))
@@ -228,7 +228,7 @@ def load_filtered(version: float, start_date, end_date, campaigns: tuple, cities
 
 @st.cache_data(show_spinner=False)
 def load_summary_table(version: float) -> pd.DataFrame:
-    con = duckdb.connect(str(config.DB_PATH), read_only=True)
+    con = config.connect_db(read_only=True)
     try:
         return con.execute("SELECT * FROM summary ORDER BY period_start DESC").df()
     finally:

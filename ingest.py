@@ -320,7 +320,7 @@ def main() -> None:
         print(f"No CSV/Excel files found in {config.INCOMING_DIR}")
         return
 
-    con = duckdb.connect(str(config.DB_PATH))
+    con = config.connect_db()
     ensure_schema(con)
 
     failures = []
