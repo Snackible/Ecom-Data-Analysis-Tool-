@@ -204,12 +204,25 @@ def load_keywords(version: float, campaigns: tuple) -> list:
         con.close()
 
 
-@st.cache_data(show_spinner=False, max_entries=3)
-def load_filtered(version: float, start_date, end_date, campaigns: tuple, cities: tuple,
-                   keywords: tuple) -> pd.DataFrame:
-    # Filtering happens in DuckDB (a columnar engine built for exactly this),
-    # not by loading all rows into pandas and boolean-masking them - only the
-    # rows that survive the filter ever reach Python.
+CORR_METRICS = {
+    "impressions": "total_impressions", "clicks": "total_clicks", "spend": "total_budget_burnt",
+    "add_to_cart": "total_a2c", "conversions": "total_conversions", "gmv": "total_gmv", "ecpm": "ecpm",
+}
+
+
+@st.cache_data(show_spinner=False, max_entries=5)
+def load_aggregates(version: float, start_date, end_date, campaigns: tuple, cities: tuple,
+                     keywords: tuple) -> dict:
+    """Every number the dashboard needs, computed entirely as SQL aggregates -
+    row-level data never leaves DuckDB into a full-size pandas DataFrame.
+
+    That used to be exactly the problem: loading the whole filtered table
+    (up to 315K rows) into pandas on every view is independently expensive
+    regardless of DuckDB's own memory_limit setting (which only bounds
+    DuckDB's internal buffers, not what gets returned to the calling
+    process) - it's what caused real OOM crashes on Render's 512MB free
+    tier. Every query here returns at most a few dozen/hundred rows.
+    """
     con = config.connect_db(read_only=True)
     try:
         campaign_ph = ",".join(["?"] * len(campaigns))
@@ -220,8 +233,69 @@ def load_filtered(version: float, start_date, end_date, campaigns: tuple, cities
             kw_ph = ",".join(["?"] * len(keywords))
             clauses.append(f"keyword IN ({kw_ph})")
             params.extend(keywords)
-        query = f"SELECT * FROM granular WHERE {' AND '.join(clauses)}"
-        return con.execute(query, params).df()
+        where = " AND ".join(clauses)
+
+        totals_row = con.execute(f"""
+            SELECT sum(total_gmv), sum(total_budget_burnt), sum(total_impressions),
+                   sum(total_clicks), sum(total_a2c), sum(total_conversions),
+                   sum(total_direct_gmv_7d), count(*)
+            FROM granular WHERE {where}
+        """, params).fetchone()
+        keys = ["gmv", "spend", "impressions", "clicks", "a2c", "conversions", "gmv_7d", "row_count"]
+        totals = {k: (v or 0) for k, v in zip(keys, totals_row)}
+
+        by_campaign = con.execute(f"""
+            SELECT campaign_name, sum(total_gmv) gmv, sum(total_budget_burnt) spend,
+                   sum(total_impressions) impressions, sum(total_clicks) clicks,
+                   sum(total_conversions) conversions
+            FROM granular WHERE {where} GROUP BY campaign_name
+        """, params).df()
+
+        by_city = con.execute(f"""
+            SELECT city, sum(total_gmv) total_gmv FROM granular WHERE {where}
+            GROUP BY city ORDER BY total_gmv DESC LIMIT 15
+        """, params).df()
+
+        by_format = con.execute(f"""
+            SELECT ad_property, sum(total_gmv) gmv, sum(total_budget_burnt) spend,
+                   sum(total_impressions) impressions
+            FROM granular WHERE {where} GROUP BY ad_property
+        """, params).df()
+
+        by_keyword_city = con.execute(f"""
+            SELECT keyword, city, sum(total_gmv) gmv, sum(total_clicks) clicks,
+                   sum(total_conversions) conversions
+            FROM granular WHERE {where} AND keyword IS NOT NULL
+            GROUP BY keyword, city ORDER BY gmv DESC LIMIT 15
+        """, params).df()
+
+        by_product = con.execute(f"""
+            SELECT product_name, sum(total_gmv) gmv, sum(total_budget_burnt) spend,
+                   sum(total_clicks) clicks, sum(total_conversions) conversions
+            FROM granular WHERE {where} AND product_name IS NOT NULL
+            GROUP BY product_name
+        """, params).df()
+
+        daily = con.execute(f"""
+            SELECT metrics_date, sum(total_gmv) "GMV", sum(total_budget_burnt) "Spend"
+            FROM granular WHERE {where} GROUP BY metrics_date ORDER BY metrics_date
+        """, params).df()
+
+        corr_select = ", ".join(
+            f'corr({c1}, {c2}) AS "{n1}__{n2}"'
+            for n1, c1 in CORR_METRICS.items() for n2, c2 in CORR_METRICS.items()
+        )
+        corr_row = con.execute(f"SELECT {corr_select} FROM granular WHERE {where}", params).fetchone()
+        corr_records = []
+        i = 0
+        for n1 in CORR_METRICS:
+            for n2 in CORR_METRICS:
+                corr_records.append({"metric1": n1, "metric2": n2, "correlation": corr_row[i] or 0})
+                i += 1
+        corr_long = pd.DataFrame(corr_records)
+
+        return dict(totals=totals, by_campaign=by_campaign, by_city=by_city, by_format=by_format,
+                    by_keyword_city=by_keyword_city, by_product=by_product, daily=daily, corr_long=corr_long)
     finally:
         con.close()
 
@@ -278,27 +352,24 @@ if not selected_cities:
     st.warning("Select at least one city.")
     st.stop()
 
-filtered = load_filtered(DB_VERSION, start_date, end_date, tuple(selected_campaigns),
-                          tuple(selected_cities), tuple(selected_keywords))
-if filtered.empty:
+agg = load_aggregates(DB_VERSION, start_date, end_date, tuple(selected_campaigns),
+                       tuple(selected_cities), tuple(selected_keywords))
+if agg["totals"]["row_count"] == 0:
     st.warning("No rows match the current filters.")
     st.stop()
 
-filtered_compare = None
+agg_compare = None
 if compare_mode:
-    filtered_compare = load_filtered(DB_VERSION, compare_start, compare_end, tuple(selected_campaigns),
-                                      tuple(selected_cities), tuple(selected_keywords))
+    agg_compare = load_aggregates(DB_VERSION, compare_start, compare_end, tuple(selected_campaigns),
+                                   tuple(selected_cities), tuple(selected_keywords))
 
 # --- KPIs (top-left) ---------------------------------------------------------
 
 
-def compute_kpis(df: pd.DataFrame) -> dict:
-    gmv = df["total_gmv"].sum()
-    spend = df["total_budget_burnt"].sum()
-    impressions = df["total_impressions"].sum()
-    clicks = df["total_clicks"].sum()
-    a2c = df["total_a2c"].sum()
-    conversions = df["total_conversions"].sum()
+def compute_kpis(totals: dict) -> dict:
+    gmv, spend = totals["gmv"], totals["spend"]
+    impressions, clicks = totals["impressions"], totals["clicks"]
+    a2c, conversions = totals["a2c"], totals["conversions"]
     return dict(
         roi=(gmv / spend if spend else 0), gmv=gmv, spend=spend, impressions=impressions,
         ecpm=(spend / impressions * 1000 if impressions else 0), clicks=clicks,
@@ -306,8 +377,9 @@ def compute_kpis(df: pd.DataFrame) -> dict:
     )
 
 
-current = compute_kpis(filtered)
-compare = compute_kpis(filtered_compare) if filtered_compare is not None and not filtered_compare.empty else None
+current = compute_kpis(agg["totals"])
+compare = (compute_kpis(agg_compare["totals"])
+           if agg_compare is not None and agg_compare["totals"]["row_count"] > 0 else None)
 
 
 def pct_delta(cur, prev):
@@ -341,10 +413,7 @@ total_impressions, total_clicks = current["impressions"], current["clicks"]
 total_gmv, total_spend, blended_roi = current["gmv"], current["spend"], current["roi"]
 
 # --- AI Insights column (formula-based, not an LLM call - see chat) --------
-by_product = filtered[filtered["product_name"].notna()].groupby("product_name").agg(
-    gmv=("total_gmv", "sum"), spend=("total_budget_burnt", "sum"),
-    clicks=("total_clicks", "sum"), conversions=("total_conversions", "sum"),
-).reset_index()
+by_product = agg["by_product"].copy()
 by_product["roi"] = by_product["gmv"] / by_product["spend"].replace(0, pd.NA)
 by_product["conv_rate"] = by_product["conversions"] / by_product["clicks"].replace(0, pd.NA) * 100
 
@@ -390,8 +459,8 @@ if compare_mode and compare is None:
 
 # --- Conversion funnel -----------------------------------------------------
 st.subheader("Conversion funnel — where the chain leaks")
-total_a2c = filtered["total_a2c"].sum()
-total_conversions = filtered["total_conversions"].sum()
+total_a2c = agg["totals"]["a2c"]
+total_conversions = agg["totals"]["conversions"]
 
 funnel_col, rate_col = st.columns([2, 1])
 with funnel_col:
@@ -419,7 +488,7 @@ with rate_col:
 st.subheader("Delayed impact — spend keeps paying off after the fact")
 st.caption("TOTAL_GMV is Instamart's full-attribution figure; the 7-day column is a shorter "
            "direct-attribution window on the same spend.")
-gmv_7d = filtered["total_direct_gmv_7d"].sum()
+gmv_7d = agg["totals"]["gmv_7d"]
 
 window_col, roi_col = st.columns([2, 1])
 with window_col:
@@ -438,15 +507,9 @@ with roi_col:
 
 # --- Correlation ------------------------------------------------------------
 st.subheader("What actually correlates with GMV?")
-st.caption("Pearson correlation across every row in the current filter. +1 = move together, "
-           "-1 = move opposite, 0 = no linear relationship. Read this before trusting any single chart above.")
-corr_cols = {
-    "impressions": "total_impressions", "clicks": "total_clicks", "spend": "total_budget_burnt",
-    "add_to_cart": "total_a2c", "conversions": "total_conversions", "gmv": "total_gmv", "ecpm": "ecpm",
-}
-corr_df = filtered[list(corr_cols.values())].rename(columns={v: k for k, v in corr_cols.items()})
-corr_long = corr_df.corr().reset_index().melt(id_vars="index", var_name="metric2", value_name="correlation")
-corr_long.columns = ["metric1", "metric2", "correlation"]
+st.caption("Pearson correlation across every row in the current filter (computed in SQL, not loaded into "
+           "pandas). +1 = move together, -1 = move opposite, 0 = no linear relationship.")
+corr_long = agg["corr_long"]
 
 heatmap = alt.Chart(corr_long).mark_rect().encode(
     x=alt.X("metric1", title=None), y=alt.Y("metric2", title=None),
@@ -461,8 +524,7 @@ st.altair_chart(heatmap + labels, use_container_width=True)
 
 # --- GMV trend -----------------------------------------------------------
 st.subheader("Daily GMV & spend")
-daily = filtered.groupby("metrics_date", as_index=False)[["total_gmv", "total_budget_burnt"]].sum()
-daily = daily.rename(columns={"total_gmv": "GMV", "total_budget_burnt": "Spend"})
+daily = agg["daily"]
 daily_long = daily.melt("metrics_date", var_name="series", value_name="value")
 y_max = max(200_000, daily[["GMV", "Spend"]].to_numpy().max())
 daily_chart = alt.Chart(daily_long).mark_line(strokeWidth=3).encode(
@@ -475,14 +537,12 @@ st.altair_chart(daily_chart, use_container_width=True)
 
 # --- By city ---------------------------------------------------------------
 st.subheader("GMV by city (top 15)")
-by_city = filtered.groupby("city")["total_gmv"].sum().sort_values(ascending=False).head(15)
+by_city = agg["by_city"].set_index("city")["total_gmv"]
 st.bar_chart(by_city, color=pal["accent"])
 
 # --- By ad format ------------------------------------------------------------
 st.subheader("Performance by ad format")
-by_format = filtered.groupby("ad_property").agg(
-    gmv=("total_gmv", "sum"), spend=("total_budget_burnt", "sum"), impressions=("total_impressions", "sum"),
-).reset_index()
+by_format = agg["by_format"].copy()
 by_format["roi"] = (by_format["gmv"] / by_format["spend"]).round(2)
 by_format = by_format.sort_values("gmv", ascending=False)
 format_chart = alt.Chart(by_format).mark_bar().encode(
@@ -495,10 +555,7 @@ st.altair_chart(format_chart, use_container_width=True)
 
 # --- Top keywords ------------------------------------------------------------
 st.subheader("Top keywords by GMV")
-by_keyword_city = filtered[filtered["keyword"].notna()].groupby(["keyword", "city"]).agg(
-    gmv=("total_gmv", "sum"), clicks=("total_clicks", "sum"), conversions=("total_conversions", "sum"),
-).reset_index().sort_values("gmv", ascending=False).head(15)
-by_keyword_city = by_keyword_city[["keyword", "city", "gmv", "clicks", "conversions"]]
+by_keyword_city = agg["by_keyword_city"]
 if by_keyword_city.empty:
     st.caption("No keyword-level data in the current filter (many ad formats target by category, not keyword).")
 else:
@@ -506,13 +563,7 @@ else:
 
 # --- Campaign rollup ---------------------------------------------------------------
 st.subheader("Campaign performance (within current filters)")
-by_campaign = filtered.groupby("campaign_name").agg(
-    gmv=("total_gmv", "sum"),
-    spend=("total_budget_burnt", "sum"),
-    impressions=("total_impressions", "sum"),
-    clicks=("total_clicks", "sum"),
-    conversions=("total_conversions", "sum"),
-).reset_index()
+by_campaign = agg["by_campaign"].copy()
 by_campaign["roi"] = (by_campaign["gmv"] / by_campaign["spend"]).round(2)
 st.dataframe(by_campaign.sort_values("gmv", ascending=False), use_container_width=True)
 
