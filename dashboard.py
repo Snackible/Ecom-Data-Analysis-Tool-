@@ -5,6 +5,7 @@ Usage:
     streamlit run dashboard.py
 """
 import os
+import subprocess
 from datetime import timedelta
 
 import altair as alt
@@ -16,6 +17,51 @@ import config
 import ingest
 
 st.set_page_config(page_title="Instamart Ads Dashboard", layout="wide")
+
+
+def commit_and_push_data() -> str | None:
+    """After a dashboard upload, commit db/ads.duckdb and push to GitHub so
+    the data survives Render's ephemeral filesystem on the next redeploy.
+
+    Requires GITHUB_TOKEN (a token scoped to just this repo's Contents:
+    read/write - see README) set as an env var; returns None and does
+    nothing if it isn't set (e.g. local dev, where the manual
+    ingest -> commit -> push workflow in the README covers this instead).
+    Never surfaces the token in any message shown to the UI, even on
+    failure - only a generic string.
+    """
+    token = os.environ.get("GITHUB_TOKEN")
+    if not token:
+        return None
+
+    repo_dir = str(config.BASE_DIR)
+
+    def run(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "-C", repo_dir, *args], capture_output=True, text=True)
+
+    remote = run("remote", "get-url", "origin")
+    if remote.returncode != 0 or not remote.stdout.strip().startswith("https://"):
+        return "Auto-push skipped: no https:// git remote configured."
+    authed_remote = remote.stdout.strip().replace("https://", f"https://x-access-token:{token}@", 1)
+
+    run("config", "user.email", "dashboard-bot@snackible.com")
+    run("config", "user.name", "Instamart Dashboard Bot")
+    run("add", "db/ads.duckdb")
+
+    status = run("status", "--porcelain", "db/ads.duckdb")
+    if not status.stdout.strip():
+        return "No data changes to commit."
+
+    commit = run("commit", "-m", "Auto-update data from dashboard upload")
+    if commit.returncode != 0:
+        return "Git commit failed - see server logs for details."
+
+    push = subprocess.run(["git", "-C", repo_dir, "push", authed_remote, "HEAD:main"],
+                           capture_output=True, text=True)
+    if push.returncode != 0:
+        return "Git push failed - check GITHUB_TOKEN is valid and has write access to this repo."
+
+    return "Data committed and pushed to GitHub - Render will redeploy shortly with the new data."
 
 # --- Access control ------------------------------------------------------------
 # Only enforced when DASHBOARD_PASSWORD is set (e.g. on a hosted deployment) -
@@ -67,19 +113,30 @@ h1, h2, h3 {{ color: {pal['text']} !important; }}
 st.title("Instamart Ads Dashboard")
 
 # --- Upload panel ------------------------------------------------------------
-with st.expander("📤 Upload new CSV exports", expanded=not config.DB_PATH.exists()):
+with st.expander("📤 Upload new CSV/Excel exports", expanded=not config.DB_PATH.exists()):
     uploaded_files = st.file_uploader(
-        "Drop IM_SUMMARY_*.csv / IM_GRANULAR_*.csv files here (filename must contain SUMMARY or GRANULAR)",
-        type="csv", accept_multiple_files=True,
+        "Drop IM_SUMMARY_*/IM_GRANULAR_* files here, .csv or .xlsx "
+        "(filename must contain SUMMARY or GRANULAR)",
+        type=["csv", "xlsx", "xls"], accept_multiple_files=True,
     )
     if uploaded_files and st.button("Ingest uploaded files"):
         config.INCOMING_DIR.mkdir(parents=True, exist_ok=True)
         config.DB_PATH.parent.mkdir(parents=True, exist_ok=True)
         saved_paths = []
+        conversion_failed = False
         for f in uploaded_files:
             dest = config.INCOMING_DIR / f.name
             dest.write_bytes(f.getvalue())
-            saved_paths.append(dest)
+            if dest.suffix.lower() in (".xlsx", ".xls"):
+                try:
+                    csv_dest = ingest.convert_excel_to_csv(dest)
+                    dest.unlink()
+                    saved_paths.append(csv_dest)
+                except ingest.SchemaError as exc:
+                    st.error(str(exc))
+                    conversion_failed = True
+            else:
+                saved_paths.append(dest)
 
         con = duckdb.connect(str(config.DB_PATH))
         ingest.ensure_schema(con)
@@ -95,7 +152,12 @@ with st.expander("📤 Upload new CSV exports", expanded=not config.DB_PATH.exis
 
         if any_success:
             st.cache_data.clear()
+            git_message = commit_and_push_data()
+            if git_message:
+                st.info(git_message)
             st.rerun()
+        elif not conversion_failed:
+            st.warning("Nothing was ingested.")
 
 if not config.DB_PATH.exists():
     st.info("No data yet - upload files above, or drop CSVs into data/incoming/ and run `python ingest.py`.")

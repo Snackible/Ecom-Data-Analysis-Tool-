@@ -69,17 +69,31 @@ def detect_file_type(path: Path) -> str:
     )
 
 
+PREAMBLE_DATE_FORMATS = ["%d/%m/%Y", "%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%m/%d/%Y"]
+
+
+def _parse_preamble_date(raw: str) -> date:
+    for fmt in PREAMBLE_DATE_FORMATS:
+        try:
+            return datetime.strptime(raw, fmt).date()
+        except ValueError:
+            continue
+    raise ValueError(f"unrecognized date format: {raw!r}")
+
+
 def parse_preamble(path: Path) -> tuple[date, date]:
     """Read the report's From Date / To Date out of the 6-line metadata
-    block at the top of the file (format DD/MM/YYYY)."""
+    block at the top of the file. Normally DD/MM/YYYY (native CSV export);
+    a few other formats are also accepted since a file converted from Excel
+    (see convert_excel_to_csv) may stringify its date cells differently."""
     with open(path, newline="", encoding="utf-8-sig") as f:
         reader = csv.reader(f)
         rows = [next(reader) for _ in range(PREAMBLE_LINES)]
 
     fields = {row[0]: row[1] for row in rows if row and row[0]}
     try:
-        from_date = datetime.strptime(fields["From Date"], "%d/%m/%Y").date()
-        to_date = datetime.strptime(fields["To Date"], "%d/%m/%Y").date()
+        from_date = _parse_preamble_date(fields["From Date"])
+        to_date = _parse_preamble_date(fields["To Date"])
     except (KeyError, ValueError) as exc:
         raise SchemaError(
             f"{path.name}: couldn't read 'From Date'/'To Date' out of the "
@@ -87,6 +101,26 @@ def parse_preamble(path: Path) -> tuple[date, date]:
             f"changed. Details: {exc}"
         ) from exc
     return from_date, to_date
+
+
+def convert_excel_to_csv(path: Path) -> Path:
+    """Convert an uploaded .xlsx/.xls export to a plain CSV with the same
+    layout DuckDB's read_csv expects (metadata preamble + header + rows),
+    so it flows through the exact same validated pipeline as a native CSV
+    export. If the sheet doesn't actually match that layout, the normal
+    preamble/column checks downstream raise a clear SchemaError - this
+    function doesn't try to guess or fix a genuinely different report shape.
+    """
+    import pandas as pd  # only needed for Excel uploads - kept out of the hot path
+
+    try:
+        sheet = pd.read_excel(path, header=None, dtype=str, engine="openpyxl")
+    except Exception as exc:
+        raise SchemaError(f"{path.name}: couldn't read this as an Excel file - {exc}") from exc
+
+    csv_path = path.with_suffix(".csv")
+    sheet.to_csv(csv_path, index=False, header=False, na_rep="")
+    return csv_path
 
 
 def validate_columns(con: duckdb.DuckDBPyConnection, staging_table: str,
@@ -273,9 +307,17 @@ def main() -> None:
     config.INCOMING_DIR.mkdir(parents=True, exist_ok=True)
     config.DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
+    excel_files = sorted(config.INCOMING_DIR.glob("*.xlsx")) + sorted(config.INCOMING_DIR.glob("*.xls"))
+    for path in excel_files:
+        try:
+            convert_excel_to_csv(path)
+            path.unlink()  # the .csv sibling now carries the data forward
+        except SchemaError as exc:
+            print(f"  FAILED: {exc}", file=sys.stderr)
+
     csv_files = sorted(config.INCOMING_DIR.glob("*.csv"))
     if not csv_files:
-        print(f"No CSV files found in {config.INCOMING_DIR}")
+        print(f"No CSV/Excel files found in {config.INCOMING_DIR}")
         return
 
     con = duckdb.connect(str(config.DB_PATH))
