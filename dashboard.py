@@ -237,11 +237,10 @@ def load_aggregates(version: float, start_date, end_date, campaigns: tuple, citi
 
         totals_row = con.execute(f"""
             SELECT sum(total_gmv), sum(total_budget_burnt), sum(total_impressions),
-                   sum(total_clicks), sum(total_a2c), sum(total_conversions),
-                   sum(total_direct_gmv_7d), count(*)
+                   sum(total_clicks), sum(total_a2c), sum(total_conversions), count(*)
             FROM granular WHERE {where}
         """, params).fetchone()
-        keys = ["gmv", "spend", "impressions", "clicks", "a2c", "conversions", "gmv_7d", "row_count"]
+        keys = ["gmv", "spend", "impressions", "clicks", "a2c", "conversions", "row_count"]
         totals = {k: (v or 0) for k, v in zip(keys, totals_row)}
 
         by_campaign = con.execute(f"""
@@ -252,8 +251,8 @@ def load_aggregates(version: float, start_date, end_date, campaigns: tuple, citi
         """, params).df()
 
         by_city = con.execute(f"""
-            SELECT city, sum(total_gmv) total_gmv FROM granular WHERE {where}
-            GROUP BY city ORDER BY total_gmv DESC LIMIT 15
+            SELECT city, sum(total_gmv) gmv, sum(total_budget_burnt) spend
+            FROM granular WHERE {where} GROUP BY city
         """, params).df()
 
         by_format = con.execute(f"""
@@ -406,8 +405,6 @@ cards_html = "".join([
               compare["impressions"] if compare else None),
     kpi_card("eCPM", f"₹{current['ecpm']:.2f}", current["ecpm"], compare["ecpm"] if compare else None),
     kpi_card("Clicks", f"{current['clicks']:,.0f}", current["clicks"], compare["clicks"] if compare else None),
-    kpi_card("Cart → Conversion rate",
-              f"{current['a2c_rate']*100:.1f}% → {current['conv_rate']*100:.1f}%"),
 ])
 total_impressions, total_clicks = current["impressions"], current["clicks"]
 total_gmv, total_spend, blended_roi = current["gmv"], current["spend"], current["roi"]
@@ -436,23 +433,21 @@ if not qualifying.empty:
             f'{conv_rate:.0f}% conversion rate</span></div>'
         )
 
-left_col, insight_col = st.columns([2, 3])
-with left_col:
-    st.markdown(f'<div class="kpi-grid">{cards_html}</div>', unsafe_allow_html=True)
-with insight_col:
+st.markdown(f'<div class="kpi-grid">{cards_html}</div>', unsafe_allow_html=True)
+
+st.markdown(
+    f'<div class="kpi-label" style="margin-bottom:6px">AI INSIGHTS — TOP 10 OUTLIER PRODUCTS '
+    f'(BY ROI DEVIATION)</div>', unsafe_allow_html=True,
+)
+if insight_rows:
     st.markdown(
-        f'<div class="kpi-label" style="margin-bottom:6px">AI INSIGHTS — TOP 10 OUTLIER PRODUCTS '
-        f'(BY ROI DEVIATION)</div>', unsafe_allow_html=True,
+        f'<div style="max-height:280px;overflow-y:auto;background:{pal["surface"]};'
+        f'border:1px solid {pal["border"]};border-radius:10px;padding:8px 12px;margin-bottom:1.2rem">'
+        + "".join(insight_rows) + "</div>",
+        unsafe_allow_html=True,
     )
-    if insight_rows:
-        st.markdown(
-            f'<div style="max-height:280px;overflow-y:auto;background:{pal["surface"]};'
-            f'border:1px solid {pal["border"]};border-radius:10px;padding:8px 12px">'
-            + "".join(insight_rows) + "</div>",
-            unsafe_allow_html=True,
-        )
-    else:
-        st.caption("No product-level data with meaningful spend in the current filter.")
+else:
+    st.caption("No product-level data with meaningful spend in the current filter.")
 
 if compare_mode and compare is None:
     st.caption("No data in the comparison period for the current filters.")
@@ -483,27 +478,6 @@ with rate_col:
     st.metric("Impressions → Clicks", f"{ctr:.2f}%")
     st.metric("Clicks → Added to cart", f"{a2c_rate:.2f}%")
     st.metric("Added to cart → Converted", f"{conv_rate:.2f}%")
-
-# --- Delayed impact of spend ------------------------------------------------
-st.subheader("Delayed impact — spend keeps paying off after the fact")
-st.caption("TOTAL_GMV is Instamart's full-attribution figure; the 7-day column is a shorter "
-           "direct-attribution window on the same spend.")
-gmv_7d = agg["totals"]["gmv_7d"]
-
-window_col, roi_col = st.columns([2, 1])
-with window_col:
-    windows = pd.DataFrame({"window": ["7-day direct", "Full attribution"], "gmv": [gmv_7d, total_gmv]})
-    chart = alt.Chart(windows).mark_bar().encode(
-        x=alt.X("window", sort=None, title=None),
-        y=alt.Y("gmv", title="GMV (₹)"),
-        color=alt.Color("window", scale=alt.Scale(range=BOLD_CATEGORICAL), legend=None),
-        tooltip=["window", "gmv"],
-    )
-    st.altair_chart(chart, use_container_width=True)
-with roi_col:
-    roi_7d = gmv_7d / total_spend if total_spend else 0
-    st.metric("7-day direct ROI", f"{roi_7d:.2f}x")
-    st.metric("Full-attribution ROI", f"{blended_roi:.2f}x")
 
 # --- Correlation ------------------------------------------------------------
 st.subheader("What actually correlates with GMV?")
@@ -536,9 +510,20 @@ daily_chart = alt.Chart(daily_long).mark_line(strokeWidth=3).encode(
 st.altair_chart(daily_chart, use_container_width=True)
 
 # --- By city ---------------------------------------------------------------
-st.subheader("GMV by city (top 15)")
-by_city = agg["by_city"].set_index("city")["total_gmv"]
-st.bar_chart(by_city, color=pal["accent"])
+st.subheader("GMV by city — best vs. worst")
+city_view = st.radio("Show", ["Top 15", "Worst 15"], horizontal=True, key="city_view")
+by_city_all = agg["by_city"]
+by_city_ranked = by_city_all.sort_values("gmv", ascending=(city_view == "Worst 15")).head(15)
+by_city_long = by_city_ranked.melt("city", value_vars=["gmv", "spend"], var_name="metric", value_name="value")
+by_city_long["metric"] = by_city_long["metric"].map({"gmv": "GMV", "spend": "Spend"})
+city_chart = alt.Chart(by_city_long).mark_bar().encode(
+    x=alt.X("value", title="₹"),
+    y=alt.Y("city", sort=by_city_ranked["city"].tolist(), title=None),
+    color=alt.Color("metric", title=None, scale=alt.Scale(range=BOLD_CATEGORICAL)),
+    yOffset="metric",
+    tooltip=["city", "metric", "value"],
+)
+st.altair_chart(city_chart, use_container_width=True)
 
 # --- By ad format ------------------------------------------------------------
 st.subheader("Performance by ad format")
