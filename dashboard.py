@@ -10,6 +10,7 @@ from datetime import timedelta
 
 import altair as alt
 import duckdb
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -17,6 +18,44 @@ import config
 import ingest
 
 st.set_page_config(page_title="Instamart Ads Dashboard", layout="wide")
+
+
+def format_inr(value, decimals: int = 0) -> str:
+    """Indian digit grouping (lakhs/crores), e.g. 2978378 -> '29,78,378'.
+
+    Python's locale module isn't reliable for this across platforms - 'en_IN'
+    often isn't installed at all in minimal Linux containers like Render's,
+    so this groups digits by hand instead of depending on system locale data.
+    """
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return "-"
+    sign = "-" if value < 0 else ""
+    value = abs(value)
+    whole = int(round(value, decimals))
+    frac = f"{value:.{decimals}f}".split(".")[1] if decimals else None
+    s = str(whole)
+    if len(s) > 3:
+        last3, rest = s[-3:], s[:-3]
+        parts = []
+        while len(rest) > 2:
+            parts.insert(0, rest[-2:])
+            rest = rest[:-2]
+        if rest:
+            parts.insert(0, rest)
+        s = ",".join(parts) + "," + last3
+    return f"{sign}{s}" + (f".{frac}" if frac else "")
+
+
+def format_df_inr(df: pd.DataFrame, cols: list) -> pd.DataFrame:
+    """Copy of df with the given numeric columns rendered as Indian-grouped
+    strings for display - Streamlit's dataframe/column_config can't express
+    Indian digit grouping natively, so this pre-formats them as text. Trades
+    away native numeric column-sort (becomes lexicographic) for the format."""
+    df = df.copy()
+    for c in cols:
+        if c in df.columns:
+            df[c] = df[c].apply(format_inr)
+    return df
 
 
 def commit_and_push_data() -> str | None:
@@ -83,13 +122,13 @@ if _required_password and not st.session_state.get("authenticated"):
 PALETTES = {
     "dark": dict(bg="#0B0F19", surface="#161B29", text="#F5F7FA", muted="#9AA4B2",
                  accent="#2F6FFF", positive="#22D07E", negative="#FF4D4F", border="#232A3B"),
-    "light": dict(bg="#F5F7FB", surface="#FFFFFF", text="#0B0F19", muted="#5B6472",
-                  accent="#2F6FFF", positive="#10B981", negative="#EF4444", border="#E1E5EF"),
+    "light": dict(bg="#FFFFFF", surface="#FFFFFF", text="#0B0F19", muted="#5B6472",
+                  accent="#1B5CFF", positive="#0EA968", negative="#E5342E", border="#E1E5EF"),
 }
-BOLD_CATEGORICAL = ["#2F6FFF", "#EC4899", "#F59E0B", "#22D07E", "#8B5CF6", "#06B6D4", "#FF4D4F", "#84CC16"]
+BOLD_CATEGORICAL = ["#1B5CFF", "#E5177A", "#F08A00", "#0EA968", "#8B3EF5", "#0097AE", "#E5342E", "#6FA800"]
 
 if "dark_mode" not in st.session_state:
-    st.session_state.dark_mode = True
+    st.session_state.dark_mode = False
 st.sidebar.toggle("🌙 Dark mode", key="dark_mode")
 pal = PALETTES["dark" if st.session_state.dark_mode else "light"]
 
@@ -276,7 +315,9 @@ def load_aggregates(version: float, start_date, end_date, campaigns: tuple, citi
         """, params).df()
 
         daily = con.execute(f"""
-            SELECT metrics_date, sum(total_gmv) "GMV", sum(total_budget_burnt) "Spend"
+            SELECT metrics_date, sum(total_gmv) gmv, sum(total_budget_burnt) spend,
+                   sum(total_impressions) impressions, sum(total_clicks) clicks,
+                   sum(total_a2c) a2c, sum(total_conversions) conversions
             FROM granular WHERE {where} GROUP BY metrics_date ORDER BY metrics_date
         """, params).df()
 
@@ -399,12 +440,12 @@ def kpi_card(label: str, value_str: str, cur_val=None, prev_val=None) -> str:
 
 cards_html = "".join([
     kpi_card("ROI", f"{current['roi']:.2f}x", current["roi"], compare["roi"] if compare else None),
-    kpi_card("GMV", f"₹{current['gmv']:,.0f}", current["gmv"], compare["gmv"] if compare else None),
-    kpi_card("Spend", f"₹{current['spend']:,.0f}", current["spend"], compare["spend"] if compare else None),
-    kpi_card("Impressions", f"{current['impressions']:,.0f}", current["impressions"],
+    kpi_card("GMV", f"₹{format_inr(current['gmv'])}", current["gmv"], compare["gmv"] if compare else None),
+    kpi_card("Spend", f"₹{format_inr(current['spend'])}", current["spend"], compare["spend"] if compare else None),
+    kpi_card("Impressions", format_inr(current['impressions']), current["impressions"],
               compare["impressions"] if compare else None),
-    kpi_card("eCPM", f"₹{current['ecpm']:.2f}", current["ecpm"], compare["ecpm"] if compare else None),
-    kpi_card("Clicks", f"{current['clicks']:,.0f}", current["clicks"], compare["clicks"] if compare else None),
+    kpi_card("eCPM", f"₹{format_inr(current['ecpm'], 2)}", current["ecpm"], compare["ecpm"] if compare else None),
+    kpi_card("Clicks", format_inr(current['clicks']), current["clicks"], compare["clicks"] if compare else None),
 ])
 total_impressions, total_clicks = current["impressions"], current["clicks"]
 total_gmv, total_spend, blended_roi = current["gmv"], current["spend"], current["roi"]
@@ -429,7 +470,7 @@ if not qualifying.empty:
             f'<div style="padding:6px 0;border-bottom:1px solid {pal["border"]};font-size:13px">'
             f'{icon} <b>{r["product_name"]}</b> — {r["roi"]:.2f}x ROI vs {blended_roi:.2f}x average '
             f'({verb} by {abs(r["deviation"]):.2f}x)<br>'
-            f'<span style="color:{pal["muted"]}">₹{r["spend"]:,.0f} spend → ₹{r["gmv"]:,.0f} GMV, '
+            f'<span style="color:{pal["muted"]}">₹{format_inr(r["spend"])} spend → ₹{format_inr(r["gmv"])} GMV, '
             f'{conv_rate:.0f}% conversion rate</span></div>'
         )
 
@@ -459,7 +500,7 @@ total_conversions = agg["totals"]["conversions"]
 
 funnel_col, rate_col = st.columns([2, 1])
 with funnel_col:
-    st.caption(f"{total_impressions:,.0f} impressions (top KPI above) feed into the funnel below.")
+    st.caption(f"{format_inr(total_impressions)} impressions (top KPI above) feed into the funnel below.")
     funnel = pd.DataFrame({
         "stage": ["1. Clicks", "2. Added to cart", "3. Converted"],
         "count": [total_clicks, total_a2c, total_conversions],
@@ -481,33 +522,55 @@ with rate_col:
 
 # --- Correlation ------------------------------------------------------------
 st.subheader("What actually correlates with GMV?")
-st.caption("Pearson correlation across every row in the current filter (computed in SQL, not loaded into "
-           "pandas). +1 = move together, -1 = move opposite, 0 = no linear relationship.")
-corr_long = agg["corr_long"]
+st.caption("Pearson correlation of each metric with GMV, across every row in the current filter "
+           "(computed in SQL, not loaded into pandas). +1 = moves with GMV, -1 = moves opposite, "
+           "0 = no linear relationship.")
+corr_with_gmv = agg["corr_long"][
+    (agg["corr_long"]["metric2"] == "gmv") & (agg["corr_long"]["metric1"] != "gmv")
+].sort_values("correlation", ascending=False)
 
-heatmap = alt.Chart(corr_long).mark_rect().encode(
-    x=alt.X("metric1", title=None), y=alt.Y("metric2", title=None),
-    color=alt.Color("correlation", scale=alt.Scale(scheme="redblue", domain=[-1, 1]), title="Correlation"),
-    tooltip=["metric1", "metric2", alt.Tooltip("correlation", format=".2f")],
+corr_bar = alt.Chart(corr_with_gmv).mark_bar().encode(
+    x=alt.X("correlation", title="Correlation with GMV", scale=alt.Scale(domain=[-1, 1])),
+    y=alt.Y("metric1", sort="-x", title=None),
+    color=alt.Color("correlation", scale=alt.Scale(scheme="redblue", domain=[-1, 1]), legend=None),
+    tooltip=["metric1", alt.Tooltip("correlation", format=".2f")],
 )
-labels = alt.Chart(corr_long).mark_text().encode(
-    x="metric1", y="metric2", text=alt.Text("correlation", format=".2f"),
-    color=alt.condition("abs(datum.correlation) > 0.6", alt.value("white"), alt.value("black")),
-)
-st.altair_chart(heatmap + labels, use_container_width=True)
+st.altair_chart(corr_bar, use_container_width=True)
 
 # --- GMV trend -----------------------------------------------------------
 st.subheader("Daily GMV & spend")
-daily = agg["daily"]
-daily_long = daily.melt("metrics_date", var_name="series", value_name="value")
-y_max = max(200_000, daily[["GMV", "Spend"]].to_numpy().max())
-daily_chart = alt.Chart(daily_long).mark_line(strokeWidth=3).encode(
+daily = agg["daily"].copy()
+daily["CTR"] = (daily["clicks"] / daily["impressions"].replace(0, pd.NA) * 100).fillna(0)
+daily["CVR"] = (daily["conversions"] / daily["clicks"].replace(0, pd.NA) * 100).fillna(0)
+
+money = daily.rename(columns={"gmv": "GMV", "spend": "Spend"}).melt(
+    "metrics_date", value_vars=["GMV", "Spend"], var_name="series", value_name="value")
+y_max = max(200_000, daily[["gmv", "spend"]].to_numpy().max())
+money_chart = alt.Chart(money).mark_line(strokeWidth=3).encode(
     x=alt.X("metrics_date", title=None),
     y=alt.Y("value", title="₹", scale=alt.Scale(domain=[0, y_max])),
     color=alt.Color("series", title=None, scale=alt.Scale(range=BOLD_CATEGORICAL)),
     tooltip=["metrics_date", "series", "value"],
 )
-st.altair_chart(daily_chart, use_container_width=True)
+st.altair_chart(money_chart, use_container_width=True)
+
+impressions_col, rate_col = st.columns(2)
+with impressions_col:
+    st.caption("Daily impressions")
+    impressions_chart = alt.Chart(daily).mark_line(strokeWidth=3, color=BOLD_CATEGORICAL[0]).encode(
+        x=alt.X("metrics_date", title=None), y=alt.Y("impressions", title="Impressions"),
+        tooltip=["metrics_date", "impressions"],
+    )
+    st.altair_chart(impressions_chart, use_container_width=True)
+with rate_col:
+    st.caption("Daily CTR & CVR")
+    rates = daily.melt("metrics_date", value_vars=["CTR", "CVR"], var_name="series", value_name="value")
+    rate_chart = alt.Chart(rates).mark_line(strokeWidth=3).encode(
+        x=alt.X("metrics_date", title=None), y=alt.Y("value", title="%"),
+        color=alt.Color("series", title=None, scale=alt.Scale(range=BOLD_CATEGORICAL[1:])),
+        tooltip=["metrics_date", "series", alt.Tooltip("value", format=".2f")],
+    )
+    st.altair_chart(rate_chart, use_container_width=True)
 
 # --- By city ---------------------------------------------------------------
 st.subheader("GMV by city — best vs. worst")
@@ -544,13 +607,15 @@ by_keyword_city = agg["by_keyword_city"]
 if by_keyword_city.empty:
     st.caption("No keyword-level data in the current filter (many ad formats target by category, not keyword).")
 else:
-    st.dataframe(by_keyword_city, use_container_width=True)
+    st.dataframe(format_df_inr(by_keyword_city, ["gmv", "clicks", "conversions"]), use_container_width=True)
 
 # --- Campaign rollup ---------------------------------------------------------------
 st.subheader("Campaign performance (within current filters)")
 by_campaign = agg["by_campaign"].copy()
 by_campaign["roi"] = (by_campaign["gmv"] / by_campaign["spend"]).round(2)
-st.dataframe(by_campaign.sort_values("gmv", ascending=False), use_container_width=True)
+money_cols = ["gmv", "spend", "impressions", "clicks", "conversions"]
+st.dataframe(format_df_inr(by_campaign.sort_values("gmv", ascending=False), money_cols),
+             use_container_width=True)
 
 # --- Underperformers ---------------------------------------------------------
 st.subheader("Underperformers to look at")
@@ -561,25 +626,40 @@ watchlist = by_campaign[
 if watchlist.empty:
     st.success("No above-median-spend campaign is returning below the blended ROI right now.")
 else:
-    st.caption(f"Spending at/above the median (₹{median_spend:,.0f}) but returning less than the "
+    st.caption(f"Spending at/above the median (₹{format_inr(median_spend)}) but returning less than the "
                f"blended ROI ({blended_roi:.2f}x) - budget worth re-examining first.")
-    st.dataframe(watchlist, use_container_width=True)
+    st.dataframe(format_df_inr(watchlist, money_cols), use_container_width=True)
 
 # --- Spend vs outcome -------------------------------------------------------
 st.subheader("Spend vs GMV by campaign — does more spend pay off?")
-st.caption("Each point is one campaign. Bubble size = impressions, color = ROI, dashed line = linear trend. "
-           "A campaign sitting below/right of the trend is spending more per rupee of GMV returned.")
-scatter = alt.Chart(by_campaign).mark_circle(opacity=0.8).encode(
+st.caption("Each point is one campaign, colored by ROI. The dashed line is the spend/GMV trend; labeled "
+           "points are the campaigns furthest above or below it - the real outliers worth a closer look.")
+
+# Residual from the trend (not just ROI) is what actually identifies an
+# outlier here - a high-ROI campaign sitting right on the trend line isn't
+# unusual, it's just small; residual distance is.
+if len(by_campaign) >= 2:
+    slope, intercept = np.polyfit(by_campaign["spend"], by_campaign["gmv"], 1)
+    by_campaign["residual"] = by_campaign["gmv"] - (slope * by_campaign["spend"] + intercept)
+else:
+    by_campaign["residual"] = 0
+outlier_labels = by_campaign.reindex(
+    by_campaign["residual"].abs().sort_values(ascending=False).index
+).head(3)
+
+scatter = alt.Chart(by_campaign).mark_circle(size=140, opacity=0.85).encode(
     x=alt.X("spend", title="Spend (₹)"),
     y=alt.Y("gmv", title="GMV (₹)"),
-    size=alt.Size("impressions", legend=None),
     color=alt.Color("roi", scale=alt.Scale(scheme="redyellowgreen"), title="ROI"),
-    tooltip=["campaign_name", "spend", "gmv", "roi", "impressions"],
+    tooltip=["campaign_name", "spend", "gmv", "roi"],
 )
 trend = alt.Chart(by_campaign).transform_regression("spend", "gmv").mark_line(
     color=pal["muted"], strokeDash=[4, 4]
 ).encode(x="spend", y="gmv")
-st.altair_chart((scatter + trend).interactive(), use_container_width=True)
+labels = alt.Chart(outlier_labels).mark_text(dy=-12, fontWeight="bold").encode(
+    x="spend", y="gmv", text="campaign_name",
+)
+st.altair_chart((scatter + trend + labels).interactive(), use_container_width=True)
 
 # --- Raw monthly summary export, if any has been loaded --------------------
 summary = load_summary_table(DB_VERSION)
