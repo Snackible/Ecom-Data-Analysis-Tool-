@@ -121,31 +121,66 @@ if _required_password and not st.session_state.get("authenticated"):
 # --- Theme -------------------------------------------------------------------
 PALETTES = {
     "dark": dict(bg="#0B0F19", surface="#161B29", text="#F5F7FA", muted="#9AA4B2",
-                 accent="#2F6FFF", positive="#22D07E", negative="#FF4D4F", border="#232A3B"),
-    "light": dict(bg="#FFFFFF", surface="#FFFFFF", text="#0B0F19", muted="#5B6472",
-                  accent="#1B5CFF", positive="#0EA968", negative="#E5342E", border="#E1E5EF"),
+                 accent="#6C9BFF", positive="#4ADE80", negative="#FF6B6B", border="#232A3B"),
+    "light": dict(bg="#FFFFFF", surface="#FFFFFF", text="#12141C", muted="#666E7D",
+                  accent="#3B6FF6", positive="#16A34A", negative="#E5342E", border="#E7E9F0"),
 }
-BOLD_CATEGORICAL = ["#1B5CFF", "#E5177A", "#F08A00", "#0EA968", "#8B3EF5", "#0097AE", "#E5342E", "#6FA800"]
+# The four brand hues the dashboard is built around (white base, colored
+# accents) - each carries a foreground (text/border) shade and a soft tint
+# for card backgrounds, tuned separately per theme so tints stay readable in
+# both light and dark mode.
+ACCENTS = {
+    "light": {
+        "blue":   dict(fg="#3B6FF6", bg="#EEF3FF", border="#C9D9FF"),
+        "pink":   dict(fg="#DB2777", bg="#FDEFF6", border="#F6C9E0"),
+        "green":  dict(fg="#16A34A", bg="#E9F9EF", border="#BFEBD1"),
+        "yellow": dict(fg="#B7791F", bg="#FFF6E0", border="#F7DFA0"),
+    },
+    "dark": {
+        "blue":   dict(fg="#6C9BFF", bg="#16213D", border="#274073"),
+        "pink":   dict(fg="#F472B6", bg="#3A1E2E", border="#5B2C46"),
+        "green":  dict(fg="#4ADE80", bg="#173626", border="#215239"),
+        "yellow": dict(fg="#FBBF24", bg="#3A2E10", border="#5C4718"),
+    },
+}
+BOLD_CATEGORICAL = ["#3B6FF6", "#DB2777", "#16A34A", "#D98E00", "#8B5CF6", "#0EA5A6", "#E5342E", "#65A30D"]
 
 if "dark_mode" not in st.session_state:
     st.session_state.dark_mode = False
 st.sidebar.toggle("🌙 Dark mode", key="dark_mode")
-pal = PALETTES["dark" if st.session_state.dark_mode else "light"]
+theme_mode = "dark" if st.session_state.dark_mode else "light"
+pal = PALETTES[theme_mode]
+accents = ACCENTS[theme_mode]
 
 st.markdown(f"""
 <style>
 .stApp {{ background-color: {pal['bg']}; }}
 .stApp, .stApp p, .stApp span, .stApp label {{ color: {pal['text']}; }}
+[data-testid="stHeader"] {{ background-color: {pal['bg']}; }}
+[data-testid="stHeader"] button, [data-testid="stHeader"] svg {{ color: {pal['text']} !important; }}
 [data-testid="stSidebar"] {{ background-color: {pal['surface']}; border-right: 1px solid {pal['border']}; }}
-h1, h2, h3 {{ color: {pal['text']} !important; }}
-.kpi-grid {{ display: grid; grid-template-columns: repeat(2, minmax(140px, 1fr)); gap: 10px;
-             max-width: 520px; margin-bottom: 1.2rem; }}
-.kpi-card {{ background: {pal['surface']}; border: 1px solid {pal['border']}; border-left: 4px solid {pal['accent']};
-             border-radius: 10px; padding: 10px 14px; }}
-.kpi-label {{ font-size: 11px; color: {pal['muted']}; text-transform: uppercase; letter-spacing: .05em; }}
-.kpi-value {{ font-size: 22px; font-weight: 800; color: {pal['text']}; margin-top: 2px; }}
-.kpi-delta-up {{ color: {pal['positive']}; font-size: 12px; font-weight: 700; margin-top: 2px; }}
-.kpi-delta-down {{ color: {pal['negative']}; font-size: 12px; font-weight: 700; margin-top: 2px; }}
+[data-testid="stSidebar"] * {{ color: {pal['text']}; }}
+
+h1 {{ color: {pal['text']} !important; font-weight: 800; margin-bottom: 4px; }}
+h1::after {{ content: ""; display: block; width: 150px; height: 5px; margin-top: 8px; border-radius: 3px;
+             background: linear-gradient(90deg, {accents['blue']['fg']}, {accents['pink']['fg']},
+             {accents['green']['fg']}, {accents['yellow']['fg']}); }}
+h2, h3 {{ color: {pal['text']} !important; font-weight: 700; }}
+h3 {{ border-left: 4px solid {accents['blue']['fg']}; padding-left: 10px; margin-top: 2.4rem !important; }}
+
+.kpi-grid {{ display: grid; grid-template-columns: repeat(2, minmax(150px, 1fr)); gap: 12px;
+             max-width: 560px; margin-bottom: 1.4rem; }}
+.kpi-card {{ border-radius: 12px; padding: 12px 16px; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06); }}
+.kpi-label {{ font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }}
+.kpi-value {{ font-size: 23px; font-weight: 800; color: {pal['text']}; margin-top: 3px; }}
+.kpi-delta-up {{ color: {pal['positive']}; font-size: 12px; font-weight: 700; margin-top: 3px; }}
+.kpi-delta-down {{ color: {pal['negative']}; font-size: 12px; font-weight: 700; margin-top: 3px; }}
+
+.stButton > button {{ background-color: {accents['blue']['fg']}; color: #FFFFFF; border: none;
+                       border-radius: 8px; font-weight: 600; }}
+.stButton > button:hover {{ background-color: {pal['text']}; color: #FFFFFF; }}
+[data-testid="stExpander"] {{ border: 1px solid {pal['border']}; border-radius: 12px; }}
+div[data-testid="stDataFrame"] {{ border: 1px solid {pal['border']}; border-radius: 10px; overflow: hidden; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -450,7 +485,8 @@ def pct_delta(cur, prev):
     return None if not prev else (cur - prev) / prev * 100
 
 
-def kpi_card(label: str, value_str: str, cur_val=None, prev_val=None) -> str:
+def kpi_card(label: str, value_str: str, color_key: str, cur_val=None, prev_val=None) -> str:
+    c = accents[color_key]
     delta_html = ""
     if compare is not None and cur_val is not None and prev_val is not None:
         d = pct_delta(cur_val, prev_val)
@@ -458,18 +494,23 @@ def kpi_card(label: str, value_str: str, cur_val=None, prev_val=None) -> str:
             cls = "kpi-delta-up" if d >= 0 else "kpi-delta-down"
             arrow = "▲" if d >= 0 else "▼"
             delta_html = f'<div class="{cls}">{arrow} {abs(d):.1f}% vs compare</div>'
-    return (f'<div class="kpi-card"><div class="kpi-label">{label}</div>'
+    card_style = f'background:{c["bg"]}; border:1px solid {c["border"]}; border-left:4px solid {c["fg"]};'
+    return (f'<div class="kpi-card" style="{card_style}">'
+            f'<div class="kpi-label" style="color:{c["fg"]}">{label}</div>'
             f'<div class="kpi-value">{value_str}</div>{delta_html}</div>')
 
 
 cards_html = "".join([
-    kpi_card("ROI", f"{current['roi']:.2f}x", current["roi"], compare["roi"] if compare else None),
-    kpi_card("GMV", f"₹{format_inr(current['gmv'])}", current["gmv"], compare["gmv"] if compare else None),
-    kpi_card("Spend", f"₹{format_inr(current['spend'])}", current["spend"], compare["spend"] if compare else None),
-    kpi_card("Impressions", format_inr(current['impressions']), current["impressions"],
+    kpi_card("ROI", f"{current['roi']:.2f}x", "blue", current["roi"], compare["roi"] if compare else None),
+    kpi_card("GMV", f"₹{format_inr(current['gmv'])}", "pink", current["gmv"], compare["gmv"] if compare else None),
+    kpi_card("Spend", f"₹{format_inr(current['spend'])}", "green", current["spend"],
+              compare["spend"] if compare else None),
+    kpi_card("Impressions", format_inr(current['impressions']), "yellow", current["impressions"],
               compare["impressions"] if compare else None),
-    kpi_card("eCPM", f"₹{format_inr(current['ecpm'], 2)}", current["ecpm"], compare["ecpm"] if compare else None),
-    kpi_card("Clicks", format_inr(current['clicks']), current["clicks"], compare["clicks"] if compare else None),
+    kpi_card("eCPM", f"₹{format_inr(current['ecpm'], 2)}", "blue", current["ecpm"],
+              compare["ecpm"] if compare else None),
+    kpi_card("Clicks", format_inr(current['clicks']), "pink", current["clicks"],
+              compare["clicks"] if compare else None),
 ])
 total_impressions, total_clicks = current["impressions"], current["clicks"]
 total_gmv, total_spend, blended_roi = current["gmv"], current["spend"], current["roi"]
@@ -491,7 +532,7 @@ if not qualifying.empty:
         icon, verb = ("🟢", "outperforming") if good else ("🔴", "underperforming")
         conv_rate = r["conv_rate"] if pd.notna(r["conv_rate"]) else 0
         insight_rows.append(
-            f'<div style="padding:6px 0;border-bottom:1px solid {pal["border"]};font-size:13px">'
+            f'<div style="padding:6px 0;border-bottom:1px solid {accents["blue"]["border"]};font-size:13px">'
             f'{icon} <b>{r["product_name"]}</b> — {r["roi"]:.2f}x ROI vs {blended_roi:.2f}x average '
             f'({verb} by {abs(r["deviation"]):.2f}x)<br>'
             f'<span style="color:{pal["muted"]}">₹{format_inr(r["spend"])} spend → ₹{format_inr(r["gmv"])} GMV, '
@@ -501,13 +542,13 @@ if not qualifying.empty:
 st.markdown(f'<div class="kpi-grid">{cards_html}</div>', unsafe_allow_html=True)
 
 st.markdown(
-    f'<div class="kpi-label" style="margin-bottom:6px">AI INSIGHTS — TOP 10 OUTLIER PRODUCTS '
-    f'(BY ROI DEVIATION)</div>', unsafe_allow_html=True,
+    f'<div class="kpi-label" style="margin-bottom:6px;color:{accents["blue"]["fg"]}">AI INSIGHTS — TOP 10 '
+    f'OUTLIER PRODUCTS (BY ROI DEVIATION)</div>', unsafe_allow_html=True,
 )
 if insight_rows:
     st.markdown(
-        f'<div style="max-height:280px;overflow-y:auto;background:{pal["surface"]};'
-        f'border:1px solid {pal["border"]};border-radius:10px;padding:8px 12px;margin-bottom:1.2rem">'
+        f'<div style="max-height:280px;overflow-y:auto;background:{accents["blue"]["bg"]};'
+        f'border:1px solid {accents["blue"]["border"]};border-radius:12px;padding:10px 14px;margin-bottom:1.4rem">'
         + "".join(insight_rows) + "</div>",
         unsafe_allow_html=True,
     )
