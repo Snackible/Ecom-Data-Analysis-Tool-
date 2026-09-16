@@ -154,8 +154,8 @@ st.title("Instamart Ads Dashboard")
 # --- Upload panel ------------------------------------------------------------
 with st.expander("📤 Upload new CSV/Excel exports", expanded=not config.DB_PATH.exists()):
     uploaded_files = st.file_uploader(
-        "Drop IM_SUMMARY_*/IM_GRANULAR_* files here, .csv or .xlsx "
-        "(filename must contain SUMMARY or GRANULAR)",
+        "Drop IM_SUMMARY_*/IM_GRANULAR_*/IM_..._SEARCH_QUERY_* files here, .csv or .xlsx "
+        "(filename must contain SUMMARY, GRANULAR, or SEARCH_QUERY)",
         type=["csv", "xlsx", "xls"], accept_multiple_files=True,
     )
     if uploaded_files and st.button("Ingest uploaded files"):
@@ -334,8 +334,32 @@ def load_aggregates(version: float, start_date, end_date, campaigns: tuple, citi
                 i += 1
         corr_long = pd.DataFrame(corr_records)
 
+        # search_query has no per-row city column (only an aggregate
+        # city_count), so it can't be filtered by the city selector the way
+        # granular can - date/campaign/keyword only. Guarded for older DBs
+        # that predate this table (e.g. before the first search-query
+        # upload).
+        has_search_query = con.execute(
+            "SELECT 1 FROM information_schema.tables WHERE table_name = 'search_query'"
+        ).fetchone()
+        if has_search_query:
+            sq_clauses = ["metrics_date BETWEEN ? AND ?", f"campaign_name IN ({campaign_ph})"]
+            sq_params = [start_date, end_date, *campaigns]
+            if keywords:
+                sq_clauses.append(f"keyword IN ({kw_ph})")
+                sq_params.extend(keywords)
+            by_search_query = con.execute(f"""
+                SELECT search_query, sum(total_gmv) gmv, sum(total_clicks) clicks,
+                       sum(total_conversions) conversions
+                FROM search_query WHERE {' AND '.join(sq_clauses)} AND search_query IS NOT NULL
+                GROUP BY search_query ORDER BY gmv DESC LIMIT 15
+            """, sq_params).df()
+        else:
+            by_search_query = pd.DataFrame(columns=["search_query", "gmv", "clicks", "conversions"])
+
         return dict(totals=totals, by_campaign=by_campaign, by_city=by_city, by_format=by_format,
-                    by_keyword_city=by_keyword_city, by_product=by_product, daily=daily, corr_long=corr_long)
+                    by_keyword_city=by_keyword_city, by_product=by_product, daily=daily, corr_long=corr_long,
+                    by_search_query=by_search_query)
     finally:
         con.close()
 
@@ -608,6 +632,16 @@ if by_keyword_city.empty:
     st.caption("No keyword-level data in the current filter (many ad formats target by category, not keyword).")
 else:
     st.dataframe(format_df_inr(by_keyword_city, ["gmv", "clicks", "conversions"]), use_container_width=True)
+
+# --- Top search queries -------------------------------------------------------
+st.subheader("Top search queries by GMV")
+st.caption("The actual terms shoppers typed, not the keyword you targeted - from the Search Query report "
+           "(not filtered by city, since that report doesn't break out by city).")
+by_search_query = agg["by_search_query"]
+if by_search_query.empty:
+    st.caption("No search query data loaded yet - upload an IM_..._SEARCH_QUERY_*.csv file above.")
+else:
+    st.dataframe(format_df_inr(by_search_query, ["gmv", "clicks", "conversions"]), use_container_width=True)
 
 # --- Campaign rollup ---------------------------------------------------------------
 st.subheader("Campaign performance (within current filters)")

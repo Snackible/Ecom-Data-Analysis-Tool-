@@ -42,9 +42,9 @@ Two ways to get new data in - pick whichever's convenient:
 ### A. Through the dashboard's upload panel (works locally or on the live site)
 
 Open the "📤 Upload new CSV/Excel exports" panel at the top, drop the new
-`IM_SUMMARY_*` / `IM_GRANULAR_*` file(s) (`.csv` or `.xlsx`/`.xls` both
-work - Excel files are converted to the same layout under the hood), click
-**Ingest uploaded files**.
+`IM_SUMMARY_*` / `IM_GRANULAR_*` / `IM_..._SEARCH_QUERY_*` file(s) (`.csv`
+or `.xlsx`/`.xls` both work - Excel files are converted to the same layout
+under the hood), click **Ingest uploaded files**.
 
 - **On the live Render deployment**: if `GITHUB_TOKEN` is configured (see
   below), a successful upload also **auto-commits and pushes**
@@ -58,7 +58,8 @@ work - Excel files are converted to the same layout under the hood), click
 ### B. Manually (CLI)
 
 1. Drop the file(s) into `data/incoming/` - filename just needs to contain
-   `SUMMARY` or `GRANULAR` (case-insensitive); `.csv` or `.xlsx`/`.xls`.
+   `SUMMARY`, `GRANULAR`, or `SEARCH_QUERY` (case-insensitive); `.csv` or
+   `.xlsx`/`.xls`.
 2. Run:
 
    ```bash
@@ -107,10 +108,16 @@ tradeoff is worth reconsidering.
 
 ## Data notes
 
-- Both exports share `CAMPAIGN_ID`. `granular` is the daily/city/keyword
-  level detail; `summary` is a per-campaign rollup over the report's date
-  range (tracked via `period_start`/`period_end` columns, since the summary
-  export has no per-row date).
+- Three DuckDB tables, one per report type, all keyed on `CAMPAIGN_ID`:
+  - `granular` - daily × city × keyword × product detail.
+  - `summary` - per-campaign rollup over the report's date range (tracked
+    via `period_start`/`period_end` columns, since the summary export has
+    no per-row date).
+  - `search_query` - the actual terms shoppers typed (as opposed to the
+    keyword you targeted), at daily × keyword × search-query × product
+    grain. **No per-row city** - only an aggregate `city_count` - so
+    anything built from this table can't be filtered by the city selector
+    the way `granular` can.
 - `eCPC` is kept as raw text - Instamart's export currently always reports
   it as the literal string `NA`.
 - `TOTAL_CTR` and `A2C_RATE` are stored as numeric percentage points (the
@@ -121,23 +128,35 @@ tradeoff is worth reconsidering.
   DuckDB expects before validation - if a sheet doesn't actually match the
   expected preamble+header+rows structure, it fails loudly with a clear
   schema error rather than silently misreading it.
+- Numbers display with **Indian digit grouping** (lakhs/crores, e.g.
+  `₹29,78,378`) everywhere in the UI - hand-rolled in `format_inr()` rather
+  than relying on Python's `locale` module, which isn't reliably available
+  cross-platform (Render's minimal Linux container in particular usually
+  doesn't have the `en_IN` locale installed). Table columns formatted this
+  way are pre-rendered as strings, so clicking their header sorts
+  alphabetically, not numerically - a real tradeoff, not a bug.
 
 ## Dashboard features
 
 - **Filters**: customizable date range with optional "Compare two periods"
   mode (any two arbitrary ranges, not just auto-previous-period); Campaigns;
   Keywords (scoped to whichever campaigns are selected); Cities.
-- **KPIs** (top-left): ROI, GMV, Spend, Impressions, eCPM, Clicks, and a
-  combined Clicks→Add-to-cart→Conversion rate stat. Show current-vs-compare
-  deltas when compare mode is on.
-- **AI Insights column** (beside the KPIs): top 10 outlier products ranked
-  by ROI deviation from the blended average, restricted to products with
-  at least median spend. This is a deterministic formula, not an LLM call -
-  see project chat history for why that tradeoff was made.
-- **Conversion funnel**, **delayed-impact attribution** (7-day direct vs.
-  full attribution), **correlation heatmap** across core metrics, **daily
-  GMV/spend trend**, **GMV by city**, **performance by ad format**, **top
-  keywords by GMV (with city breakdown)**, **campaign performance table**,
-  **underperformer watchlist**, **spend-vs-GMV scatter with trendline**.
-- **Dark/light theme toggle**, bold high-contrast palette.
+- **KPIs** (top-left): ROI, GMV, Spend, Impressions, eCPM, Clicks. Show
+  current-vs-compare deltas when compare mode is on.
+- **AI Insights** (below the KPIs): top 10 outlier products ranked by ROI
+  deviation from the blended average, restricted to products with at least
+  median spend. This is a deterministic formula, not an LLM call - see
+  project chat history for why that tradeoff was made.
+- **Conversion funnel**, **correlation with GMV** (sorted bar per metric,
+  computed as a SQL aggregate - verified to match pandas `.corr()` exactly
+  before being built), **daily GMV/spend trend** plus separate daily
+  impressions and CTR/CVR charts, **GMV by city** with a Top 15/Worst 15
+  toggle showing GMV and spend together, **performance by ad format**,
+  **top keywords by GMV** (with city breakdown), **top search queries by
+  GMV** (not city-filterable - see Data notes), **campaign performance
+  table**, **underperformer watchlist**, and a **spend-vs-GMV scatter**
+  that labels the campaigns furthest from the trend line by name rather
+  than relying on an unlabeled bubble-size encoding.
+- **Dark/light theme toggle** (light, true-white-based, is the default),
+  bold high-contrast palette.
 - Password-gated when `DASHBOARD_PASSWORD` is set (hosted deployment only).

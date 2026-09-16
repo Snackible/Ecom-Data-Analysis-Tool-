@@ -1,6 +1,6 @@
 """
-Loads Instamart ads CSV exports (IM_SUMMARY_*.csv / IM_GRANULAR_*.csv) from
-data/incoming/ into a local DuckDB file.
+Loads Instamart ads CSV exports (IM_SUMMARY_*.csv / IM_GRANULAR_*.csv /
+IM_..._SEARCH_QUERY_*.csv) from data/incoming/ into a local DuckDB file.
 
 Each export starts with a 6-line metadata block (Selected Filters / From
 Date / To Date / Ads Type / Campaign Name or ID / blank line) before the
@@ -10,12 +10,12 @@ skipped for the actual table data.
 Usage:
     python ingest.py
 
-Drop new files into data/incoming/ (any filename containing "SUMMARY" or
-"GRANULAR", case-insensitive) and re-run - already-loaded files are moved
-to data/processed/ so re-running only picks up what's new. Loading is
-idempotent by report period: re-ingesting a file (or a corrected re-export
-covering the same date range) replaces that period's rows instead of
-duplicating them.
+Drop new files into data/incoming/ (any filename containing "SUMMARY",
+"GRANULAR", or "SEARCH_QUERY", case-insensitive) and re-run -
+already-loaded files are moved to data/processed/ so re-running only picks
+up what's new. Loading is idempotent by report period: re-ingesting a file
+(or a corrected re-export covering the same date range) replaces that
+period's rows instead of duplicating them.
 """
 import csv
 import re
@@ -49,6 +49,18 @@ GRANULAR_COLUMNS = [
     "TOTAL_DIRECT_ROI_14_DAYS", "AD_RANK",
 ]
 
+SEARCH_QUERY_COLUMNS = [
+    "METRICS_DATE", "CAMPAIGN_ID", "CAMPAIGN_NAME", "CAMPAIGN_START_DATE",
+    "CAMPAIGN_END_DATE", "CAMPAIGN_STATUS", "BIDDING_TYPE", "BUDGET_TYPE",
+    "AD_PROPERTY", "KEYWORD", "MATCH_TYPE", "SEARCH_QUERY", "L1_CATEGORY_COUNT",
+    "L2_CATEGORY_COUNT", "PRODUCT_NAME", "BRAND_NAME", "CITY_COUNT", "eCPM",
+    "eCPC", "TOTAL_IMPRESSIONS", "TOTAL_BUDGET", "TOTAL_BUDGET_BURNT",
+    "TOTAL_CLICKS", "TOTAL_CTR", "TOTAL_A2C", "A2C_RATE", "TOTAL_GMV",
+    "TOTAL_CONVERSIONS", "TOTAL_ROI", "TOTAL_DIRECT_GMV_7_DAYS",
+    "TOTAL_DIRECT_ROI_7_DAYS", "TOTAL_DIRECT_GMV_14_DAYS",
+    "TOTAL_DIRECT_ROI_14_DAYS", "AD_RANK",
+]
+
 PREAMBLE_LINES = 6
 
 
@@ -58,14 +70,17 @@ class SchemaError(Exception):
 
 def detect_file_type(path: Path) -> str:
     name = path.name.upper()
+    if "SEARCH_QUERY" in name:
+        return "search_query"
     if "SUMMARY" in name:
         return "summary"
     if "GRANULAR" in name:
         return "granular"
     raise SchemaError(
-        f"{path.name}: can't tell if this is a summary or granular export - "
-        f'expected the filename to contain "SUMMARY" or "GRANULAR" '
-        f"(e.g. IM_SUMMARY_....csv / IM_GRANULAR_....csv)."
+        f"{path.name}: can't tell if this is a summary, granular, or search "
+        f'query export - expected the filename to contain "SUMMARY", '
+        f'"GRANULAR", or "SEARCH_QUERY" (e.g. IM_SUMMARY_....csv / '
+        f"IM_GRANULAR_....csv / IM_..._SEARCH_QUERY_....csv)."
     )
 
 
@@ -132,8 +147,8 @@ def validate_columns(con: duckdb.DuckDBPyConnection, staging_table: str,
         raise SchemaError(
             f"{source_name}: missing expected column(s) {missing}. "
             f"Found columns: {actual}. The export format may have changed - "
-            f"update SUMMARY_COLUMNS/GRANULAR_COLUMNS in ingest.py if this "
-            f"is an intentional, permanent rename."
+            f"update SUMMARY_COLUMNS/GRANULAR_COLUMNS/SEARCH_QUERY_COLUMNS in "
+            f"ingest.py if this is an intentional, permanent rename."
         )
     if unexpected:
         print(f"  note: {source_name} has unrecognized extra column(s) {unexpected} - ignored")
@@ -171,6 +186,23 @@ def ensure_schema(con: duckdb.DuckDBPyConnection) -> None:
             total_roi DOUBLE, total_direct_gmv_7d DOUBLE, total_direct_roi_7d DOUBLE,
             total_direct_gmv_14d DOUBLE, total_direct_roi_14d DOUBLE,
             ad_rank DOUBLE, source_file VARCHAR, loaded_at TIMESTAMP
+        );
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS search_query (
+            metrics_date DATE, campaign_id VARCHAR, campaign_name VARCHAR,
+            campaign_start_date DATE, campaign_end_date DATE,
+            campaign_status VARCHAR, bidding_type VARCHAR, budget_type VARCHAR,
+            ad_property VARCHAR, keyword VARCHAR, match_type VARCHAR,
+            search_query VARCHAR, l1_category_count BIGINT, l2_category_count BIGINT,
+            product_name VARCHAR, brand_name VARCHAR, city_count BIGINT, ecpm DOUBLE,
+            ecpc VARCHAR, total_impressions BIGINT, total_budget DOUBLE,
+            total_budget_burnt DOUBLE, total_clicks BIGINT, total_ctr DOUBLE,
+            total_a2c BIGINT, a2c_rate DOUBLE, total_gmv DOUBLE,
+            total_conversions BIGINT, total_roi DOUBLE, total_direct_gmv_7d DOUBLE,
+            total_direct_roi_7d DOUBLE, total_direct_gmv_14d DOUBLE,
+            total_direct_roi_14d DOUBLE, ad_rank DOUBLE, source_file VARCHAR,
+            loaded_at TIMESTAMP
         );
     """)
     con.execute("""
@@ -270,6 +302,55 @@ def load_granular(con: duckdb.DuckDBPyConnection, path: Path) -> int:
     return row_count
 
 
+def load_search_query(con: duckdb.DuckDBPyConnection, path: Path) -> int:
+    con.execute(f"""
+        CREATE OR REPLACE TEMP TABLE stg AS
+        SELECT * FROM read_csv('{path.as_posix()}', skip={PREAMBLE_LINES},
+                                header=True, all_varchar=True);
+    """)
+    validate_columns(con, "stg", SEARCH_QUERY_COLUMNS, path.name)
+
+    row_count = con.execute("SELECT count(*) FROM stg").fetchone()[0]
+    if row_count == 0:
+        print(f"  note: {path.name} has no data rows - nothing to load")
+        return 0
+
+    period_start, period_end = con.execute(
+        "SELECT min(TRY_CAST(METRICS_DATE AS DATE)), max(TRY_CAST(METRICS_DATE AS DATE)) FROM stg"
+    ).fetchone()
+
+    con.execute("DELETE FROM search_query WHERE metrics_date BETWEEN ? AND ?",
+                [period_start, period_end])
+    con.execute(f"""
+        INSERT INTO search_query
+        SELECT
+            TRY_CAST(METRICS_DATE AS DATE), CAMPAIGN_ID, CAMPAIGN_NAME,
+            TRY_CAST(CAMPAIGN_START_DATE AS DATE),
+            TRY_CAST(NULLIF(CAMPAIGN_END_DATE, '') AS DATE),
+            CAMPAIGN_STATUS, BIDDING_TYPE, BUDGET_TYPE, AD_PROPERTY,
+            NULLIF(KEYWORD, ''), MATCH_TYPE, NULLIF(SEARCH_QUERY, ''),
+            TRY_CAST(L1_CATEGORY_COUNT AS BIGINT), TRY_CAST(L2_CATEGORY_COUNT AS BIGINT),
+            NULLIF(PRODUCT_NAME, ''), BRAND_NAME, TRY_CAST(CITY_COUNT AS BIGINT),
+            TRY_CAST(eCPM AS DOUBLE), eCPC,
+            TRY_CAST(TOTAL_IMPRESSIONS AS BIGINT), TRY_CAST(TOTAL_BUDGET AS DOUBLE),
+            TRY_CAST(TOTAL_BUDGET_BURNT AS DOUBLE), TRY_CAST(TOTAL_CLICKS AS BIGINT),
+            TRY_CAST(REPLACE(TOTAL_CTR, '%', '') AS DOUBLE),
+            TRY_CAST(TOTAL_A2C AS BIGINT),
+            TRY_CAST(REPLACE(A2C_RATE, '%', '') AS DOUBLE),
+            TRY_CAST(TOTAL_GMV AS DOUBLE), TRY_CAST(TOTAL_CONVERSIONS AS BIGINT),
+            TRY_CAST(TOTAL_ROI AS DOUBLE),
+            TRY_CAST(TOTAL_DIRECT_GMV_7_DAYS AS DOUBLE),
+            TRY_CAST(TOTAL_DIRECT_ROI_7_DAYS AS DOUBLE),
+            TRY_CAST(TOTAL_DIRECT_GMV_14_DAYS AS DOUBLE),
+            TRY_CAST(TOTAL_DIRECT_ROI_14_DAYS AS DOUBLE),
+            CASE WHEN AD_RANK = 'NA' THEN NULL ELSE TRY_CAST(AD_RANK AS DOUBLE) END,
+            ?, now()
+        FROM stg
+    """, [path.name])
+
+    return row_count
+
+
 def ingest_file(con: duckdb.DuckDBPyConnection, path: Path) -> None:
     file_type = detect_file_type(path)
     print(f"Loading {path.name} ({file_type}) ...")
@@ -278,13 +359,15 @@ def ingest_file(con: duckdb.DuckDBPyConnection, path: Path) -> None:
         row_count = load_summary(con, path)
         period_start, period_end = parse_preamble(path)
     else:
-        row_count = load_granular(con, path)
+        table = "granular" if file_type == "granular" else "search_query"
+        loader = load_granular if file_type == "granular" else load_search_query
+        row_count = loader(con, path)
         if row_count == 0:
             period_start = period_end = None
         else:
             period_start, period_end = con.execute(
-                "SELECT min(metrics_date), max(metrics_date) FROM granular "
-                "WHERE source_file = ?", [path.name]
+                f"SELECT min(metrics_date), max(metrics_date) FROM {table} "
+                f"WHERE source_file = ?", [path.name]
             ).fetchone()
 
     con.execute("""
