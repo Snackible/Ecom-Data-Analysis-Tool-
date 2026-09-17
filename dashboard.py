@@ -19,12 +19,15 @@ import ingest
 
 st.set_page_config(page_title="Instamart Ads Dashboard", layout="wide")
 
-# Auto-rebuild database from CSVs in data/processed/ if it doesn't exist (e.g. after Render restart)
+# Auto-rebuild the DuckDB from the gzipped archives in data/processed/ if the
+# DB file is missing. On Render's free tier the disk is ephemeral, so the DB
+# is wiped on every redeploy - this repopulates it from the source data that
+# IS committed to git (as .csv.gz), so users don't have to re-upload monthly.
 if not config.DB_PATH.exists():
-    csv_files = list(config.PROCESSED_DIR.glob("*.csv"))
-    if csv_files:
-        with st.spinner("Rebuilding database from source CSVs..."):
-            ingest.ingest_files(csv_files)
+    if list(config.PROCESSED_DIR.glob("*.csv.gz")):
+        with st.spinner("Rebuilding database from archived exports..."):
+            n = ingest.rebuild_from_processed()
+            st.toast(f"Rebuilt database from {n} archived file(s)")
 
 
 def format_inr(value, decimals: int = 0) -> str:

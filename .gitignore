@@ -5,6 +5,9 @@ __pycache__/
 db/*.duckdb
 db/*.duckdb.wal
 data/incoming/*.csv
+data/incoming/*.xlsx
+data/incoming/*.xls
 data/processed/*.csv
 !data/incoming/.gitkeep
 !data/processed/.gitkeep
+# Note: compressed .csv.gz IS tracked (Git-friendly; auto-rebuilds DB on startup)

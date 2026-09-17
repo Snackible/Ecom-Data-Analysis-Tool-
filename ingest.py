@@ -18,6 +18,7 @@ up what's new. Loading is idempotent by report period: re-ingesting a file
 period's rows instead of duplicating them.
 """
 import csv
+import gzip
 import re
 import sys
 from datetime import date, datetime
@@ -26,6 +27,13 @@ from pathlib import Path
 import duckdb
 
 import config
+
+
+def _open_csv(path: Path):
+    """Open a CSV file for reading, transparently handling .gz compression."""
+    if path.suffix == ".gz":
+        return gzip.open(path, mode="rt", newline="", encoding="utf-8-sig")
+    return open(path, newline="", encoding="utf-8-sig")
 
 SUMMARY_COLUMNS = [
     "CAMPAIGN_ID", "CAMPAIGN_NAME", "CAMPAIGN_START_DATE", "CAMPAIGN_END_DATE",
@@ -101,7 +109,7 @@ def parse_preamble(path: Path) -> tuple[date, date]:
     block at the top of the file. Normally DD/MM/YYYY (native CSV export);
     a few other formats are also accepted since a file converted from Excel
     (see convert_excel_to_csv) may stringify its date cells differently."""
-    with open(path, newline="", encoding="utf-8-sig") as f:
+    with _open_csv(path) as f:
         reader = csv.reader(f)
         rows = [next(reader) for _ in range(PREAMBLE_LINES)]
 
@@ -380,10 +388,72 @@ def ingest_file(con: duckdb.DuckDBPyConnection, path: Path) -> None:
     print(f"  {row_count} rows -> {file_type} table (period {period_start} .. {period_end})")
 
     config.PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
-    # .replace() (not .rename()) - on Windows, rename() raises FileExistsError
-    # if the destination already exists (e.g. re-dropping the same filename);
-    # replace() overwrites, matching POSIX rename() behavior.
-    path.replace(config.PROCESSED_DIR / path.name)
+    # Archive as .csv.gz - keeps the repo small enough to commit source data
+    # to git (under GitHub's 100MB per-file limit, ~30x compression on these
+    # exports), so the DB can auto-rebuild on Render restarts without needing
+    # a paid persistent disk.
+    if path.suffix == ".gz":
+        path.replace(config.PROCESSED_DIR / path.name)
+    else:
+        dest = config.PROCESSED_DIR / (path.name + ".gz")
+        with open(path, "rb") as src, gzip.open(dest, "wb") as gz:
+            gz.writelines(src)
+        path.unlink()
+
+
+def rebuild_from_processed() -> int:
+    """Rebuild the DuckDB database from the .csv.gz archives in
+    data/processed/. Called on app startup when the ephemeral DB file is
+    missing (e.g. after a Render redeploy). Returns the number of files
+    successfully re-ingested."""
+    config.DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    archived = sorted(config.PROCESSED_DIR.glob("*.csv.gz"))
+    if not archived:
+        return 0
+
+    con = config.connect_db()
+    ensure_schema(con)
+
+    loaded = 0
+    for path in archived:
+        # ingest_file() moves the source out of its directory after load;
+        # rebuild reads from processed/ AND wants to leave the file there,
+        # so load in place without the archival move.
+        try:
+            _load_only(con, path)
+            loaded += 1
+        except SchemaError as exc:
+            print(f"  rebuild FAILED for {path.name}: {exc}", file=sys.stderr)
+    con.close()
+    return loaded
+
+
+def _load_only(con: duckdb.DuckDBPyConnection, path: Path) -> None:
+    """Same load path as ingest_file() but without the archival move -
+    used by rebuild_from_processed() so re-loading from processed/ doesn't
+    try to move the file onto itself."""
+    file_type = detect_file_type(path)
+    print(f"Rebuilding from {path.name} ({file_type}) ...")
+    if file_type == "summary":
+        row_count = load_summary(con, path)
+        period_start, period_end = parse_preamble(path)
+    else:
+        table = "granular" if file_type == "granular" else "search_query"
+        loader = load_granular if file_type == "granular" else load_search_query
+        row_count = loader(con, path)
+        if row_count == 0:
+            period_start = period_end = None
+        else:
+            period_start, period_end = con.execute(
+                f"SELECT min(metrics_date), max(metrics_date) FROM {table} "
+                f"WHERE source_file = ?", [path.name]
+            ).fetchone()
+    con.execute("""
+        INSERT INTO ingested_files VALUES (?, ?, ?, ?, ?, now())
+        ON CONFLICT (file_name) DO UPDATE SET
+            period_start = excluded.period_start, period_end = excluded.period_end,
+            row_count = excluded.row_count, loaded_at = excluded.loaded_at
+    """, [path.name, file_type, period_start, period_end, row_count])
 
 
 def main() -> None:
