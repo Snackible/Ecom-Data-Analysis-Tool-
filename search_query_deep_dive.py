@@ -43,7 +43,7 @@ MEANINGFUL_SPEND = 100  # rupees - min spend before a keyword's ROI is worth jud
 @st.cache_data(show_spinner=False)
 def _match_type_overview(db_version, start_date, end_date, campaigns, cities):
     """One row per match type with all the top-line metrics."""
-    con = config.connect_db(read_only=True)
+    con = config.connect_db()
     df = con.execute(f"""
         SELECT
             match_type,
@@ -75,7 +75,7 @@ def _keyword_grades(db_version, start_date, end_date, campaigns, cities):
     """One row per (keyword, match_type) with metrics + a grade bucket for
     the recommendation tables. Non-keyword rows (match_type INVALID or
     keyword IS NULL) are excluded - they can't be graded as a keyword."""
-    con = config.connect_db(read_only=True)
+    con = config.connect_db()
     df = con.execute(f"""
         SELECT
             keyword,
@@ -108,7 +108,7 @@ def _head_to_head(db_version, start_date, end_date, campaigns, cities):
     """Keywords that were run in BOTH broad and exact - one row per
     keyword with the two match types pivoted side by side. This is what
     powers the "switch match type" recommendations."""
-    con = config.connect_db(read_only=True)
+    con = config.connect_db()
     df = con.execute(f"""
         WITH per_kw AS (
             SELECT keyword, match_type,
@@ -148,7 +148,7 @@ def _search_query_overview(db_version, start_date, end_date, campaigns):
     """Top-level search-query domain KPIs. Every value comes from a
     single SQL rollup over the real search_query rows in the window -
     no fabricated numbers, no filled-in placeholders."""
-    con = config.connect_db(read_only=True)
+    con = config.connect_db()
     row = con.execute(f"""
         SELECT
             COUNT(DISTINCT search_query) AS unique_queries,
@@ -188,7 +188,7 @@ def _query_length_analysis(db_version, start_date, end_date, campaigns):
     queries usually reflect stronger purchase intent than head terms,
     so comparing ROI/conv-rate across buckets exposes whether the
     broader-intent traffic is actually converting."""
-    con = config.connect_db(read_only=True)
+    con = config.connect_db()
     df = con.execute(f"""
         WITH per_q AS (
             SELECT search_query,
@@ -242,7 +242,7 @@ def _intent_gap_queries(db_version, start_date, end_date, campaigns, min_spend):
 
     Only broad-match rows are considered - exact match by definition
     has query == keyword, so intent gap doesn't apply."""
-    con = config.connect_db(read_only=True)
+    con = config.connect_db()
     df = con.execute(f"""
         WITH per_q AS (
             SELECT search_query, keyword,
@@ -286,7 +286,7 @@ def _query_quadrants(db_version, start_date, end_date, campaigns, min_impression
     """Every query rolled up with impressions + ROI, so the render layer
     can plot the volume x value scatter and classify each into one of
     four quadrants against the median lines."""
-    con = config.connect_db(read_only=True)
+    con = config.connect_db()
     df = con.execute(f"""
         SELECT search_query,
                SUM(total_impressions) AS impressions,
@@ -312,7 +312,7 @@ def _search_query_intelligence(db_version, start_date, end_date, campaigns):
     """Top and bottom actual search queries (what shoppers typed).
     search_query has no per-row city column (it has a city_count aggregate
     instead), so city filtering doesn't apply here - flagged in the UI."""
-    con = config.connect_db(read_only=True)
+    con = config.connect_db()
     top = con.execute(f"""
         SELECT search_query, keyword, match_type,
                SUM(total_impressions) AS impressions,
@@ -357,7 +357,7 @@ def _search_query_intelligence(db_version, start_date, end_date, campaigns):
 def _product_keyword_matrix(db_version, start_date, end_date, campaigns, cities):
     """Top product x keyword combinations - shows which pairings pay off
     (great creative alignment) and which don't (mismatch to hunt down)."""
-    con = config.connect_db(read_only=True)
+    con = config.connect_db()
     df = con.execute(f"""
         SELECT product_name, keyword, match_type,
                SUM(total_budget_burnt) AS spend,

@@ -444,7 +444,7 @@ DB_VERSION = config.DB_PATH.stat().st_mtime
 
 @st.cache_data(show_spinner=False)
 def load_filter_options(version: float):
-    con = config.connect_db(read_only=True)
+    con = config.connect_db()
     try:
         min_date, max_date = con.execute(
             "SELECT min(metrics_date), max(metrics_date) FROM granular").fetchone()
@@ -462,7 +462,7 @@ def load_filter_options(version: float):
 def load_keywords(version: float, campaigns: tuple) -> list:
     if not campaigns:
         return []
-    con = config.connect_db(read_only=True)
+    con = config.connect_db()
     try:
         ph = ",".join(["?"] * len(campaigns))
         rows = con.execute(
@@ -494,7 +494,7 @@ def load_aggregates(version: float, start_date, end_date, campaigns: tuple, citi
     process) - it's what caused real OOM crashes on Render's 512MB free
     tier. Every query here returns at most a few dozen/hundred rows.
     """
-    con = config.connect_db(read_only=True)
+    con = config.connect_db()
     try:
         campaign_ph = ",".join(["?"] * len(campaigns))
         city_ph = ",".join(["?"] * len(cities))
@@ -598,7 +598,7 @@ def load_aggregates(version: float, start_date, end_date, campaigns: tuple, citi
 
 @st.cache_data(show_spinner=False)
 def load_summary_table(version: float) -> pd.DataFrame:
-    con = config.connect_db(read_only=True)
+    con = config.connect_db()
     try:
         return con.execute("SELECT * FROM summary ORDER BY period_start DESC").df()
     finally:
