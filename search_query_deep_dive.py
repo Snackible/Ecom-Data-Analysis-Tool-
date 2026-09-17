@@ -286,7 +286,7 @@ def render(db_version, start_date, end_date, selected_campaigns, selected_cities
                                             range=[accents["blue"]["fg"], accents["green"]["fg"]])),
             tooltip=["Match type", "Metric", alt.Tooltip("Share:Q", format=".1f")],
         ).properties(height=110)
-        st.altair_chart(chart, use_container_width=True)
+        st.altair_chart(chart, width='stretch')
         broad_gmv_share = real[real["match_type_label"] == "Broad"]["gmv"].iloc[0] / total_gmv * 100
         broad_spend_share = real[real["match_type_label"] == "Broad"]["spend"].iloc[0] / total_spend * 100
         skew = broad_gmv_share - broad_spend_share
@@ -325,7 +325,7 @@ def render(db_version, start_date, end_date, selected_campaigns, selected_cities
         display["ROI"] = display["ROI"].round(2)
         display["CTR %"] = display["CTR %"].round(2)
         st.dataframe(format_df_inr(display, ["Spend", "GMV", "CPA"]),
-                     use_container_width=True, hide_index=True)
+                     width='stretch', hide_index=True)
 
     st.divider()
 
@@ -358,7 +358,7 @@ def render(db_version, start_date, end_date, selected_campaigns, selected_cities
         st.error(f"💸 Total unrecovered spend from these keywords: ₹{format_inr(total_wasted)} "
                  f"(across {len(losers)} keyword-match combos)")
         st.dataframe(format_df_inr(display, ["Spend", "GMV"]),
-                     use_container_width=True, hide_index=True)
+                     width='stretch', hide_index=True)
 
     st.divider()
 
@@ -383,7 +383,7 @@ def render(db_version, start_date, end_date, selected_campaigns, selected_cities
         display["CTR %"] = display["CTR %"].round(2)
         display["CPA"] = "-"  # infinite by definition
         st.dataframe(format_df_inr(display, ["Spend"]),
-                     use_container_width=True, hide_index=True)
+                     width='stretch', hide_index=True)
 
     st.divider()
 
@@ -423,7 +423,7 @@ def render(db_version, start_date, end_date, selected_campaigns, selected_cities
         })
         st.dataframe(
             format_df_inr(display, ["Broad Spend", "Broad GMV", "Exact Spend", "Exact GMV"]),
-            use_container_width=True, hide_index=True,
+            width='stretch', hide_index=True,
         )
 
     st.divider()
@@ -450,7 +450,7 @@ def render(db_version, start_date, end_date, selected_campaigns, selected_cities
                 "roi": "ROI", "conversions": "Conv",
             })
             st.dataframe(format_df_inr(t, ["Spend", "GMV"]),
-                         use_container_width=True, hide_index=True, height=420)
+                         width='stretch', hide_index=True, height=420)
     with w_col:
         st.markdown("**Wasted spend queries (spent ≥ ₹100, zero conversions)**")
         st.caption("These are top candidates to add as **negative keywords** — "
@@ -465,7 +465,7 @@ def render(db_version, start_date, end_date, selected_campaigns, selected_cities
                 "impressions": "Impr.",
             })
             st.dataframe(format_df_inr(w, ["Spend"]),
-                         use_container_width=True, hide_index=True, height=420)
+                         width='stretch', hide_index=True, height=420)
             total_waste = waste_q["spend"].sum()
             st.error(f"💸 Total wasted spend from these queries: ₹{format_inr(total_waste)}")
 
@@ -500,7 +500,7 @@ def render(db_version, start_date, end_date, selected_campaigns, selected_cities
                     "roi": "ROI", "conversions": "Conv",
                 })
                 st.dataframe(format_df_inr(g, ["Spend", "GMV"]),
-                             use_container_width=True, hide_index=True, height=420)
+                             width='stretch', hide_index=True, height=420)
         with mud_col:
             st.markdown("**Money pit pairings (spend but ROI < 1x)**")
             mud = (pk[(pk["roi"] < LOSER_ROI)]
@@ -518,7 +518,7 @@ def render(db_version, start_date, end_date, selected_campaigns, selected_cities
                     "roi": "ROI", "conversions": "Conv",
                 })
                 st.dataframe(format_df_inr(m, ["Spend", "GMV"]),
-                             use_container_width=True, hide_index=True, height=420)
+                             width='stretch', hide_index=True, height=420)
 
     st.divider()
 

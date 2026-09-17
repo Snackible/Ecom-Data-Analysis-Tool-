@@ -806,7 +806,7 @@ with funnel_col:
         color=alt.Color("stage", scale=alt.Scale(range=BOLD_CATEGORICAL), legend=None),
         tooltip=["stage", "count"],
     )
-    st.altair_chart(chart, use_container_width=True)
+    st.altair_chart(chart, width='stretch')
 with rate_col:
     ctr = total_clicks / total_impressions * 100 if total_impressions else 0
     a2c_rate = total_a2c / total_clicks * 100 if total_clicks else 0
@@ -830,7 +830,7 @@ corr_bar = alt.Chart(corr_with_gmv).mark_bar().encode(
     color=alt.Color("correlation", scale=alt.Scale(scheme="redblue", domain=[-1, 1]), legend=None),
     tooltip=["metric1", alt.Tooltip("correlation", format=".2f")],
 )
-st.altair_chart(corr_bar, use_container_width=True)
+st.altair_chart(corr_bar, width='stretch')
 
 # --- GMV trend -----------------------------------------------------------
 st.subheader("Daily GMV & spend")
@@ -847,7 +847,7 @@ money_chart = alt.Chart(money).mark_line(strokeWidth=3).encode(
     color=alt.Color("series", title=None, scale=alt.Scale(range=BOLD_CATEGORICAL)),
     tooltip=["metrics_date", "series", "value"],
 )
-st.altair_chart(money_chart, use_container_width=True)
+st.altair_chart(money_chart, width='stretch')
 
 impressions_col, rate_col = st.columns(2)
 with impressions_col:
@@ -856,7 +856,7 @@ with impressions_col:
         x=alt.X("metrics_date", title=None), y=alt.Y("impressions", title="Impressions"),
         tooltip=["metrics_date", "impressions"],
     )
-    st.altair_chart(impressions_chart, use_container_width=True)
+    st.altair_chart(impressions_chart, width='stretch')
 with rate_col:
     st.caption("Daily CTR & CVR")
     rates = daily.melt("metrics_date", value_vars=["CTR", "CVR"], var_name="series", value_name="value")
@@ -865,7 +865,7 @@ with rate_col:
         color=alt.Color("series", title=None, scale=alt.Scale(range=BOLD_CATEGORICAL[1:])),
         tooltip=["metrics_date", "series", alt.Tooltip("value", format=".2f")],
     )
-    st.altair_chart(rate_chart, use_container_width=True)
+    st.altair_chart(rate_chart, width='stretch')
 
 # --- By city ---------------------------------------------------------------
 st.subheader("GMV by city — best vs. worst")
@@ -881,7 +881,7 @@ city_chart = alt.Chart(by_city_long).mark_bar().encode(
     yOffset="metric",
     tooltip=["city", "metric", "value"],
 )
-st.altair_chart(city_chart, use_container_width=True)
+st.altair_chart(city_chart, width='stretch')
 
 # --- By ad format ------------------------------------------------------------
 st.subheader("Performance by ad format")
@@ -894,7 +894,7 @@ format_chart = alt.Chart(by_format).mark_bar().encode(
     color=alt.Color("roi", scale=alt.Scale(scheme="redyellowgreen"), title="ROI"),
     tooltip=["ad_property", "gmv", "spend", "roi"],
 )
-st.altair_chart(format_chart, use_container_width=True)
+st.altair_chart(format_chart, width='stretch')
 
 # --- Top keywords ------------------------------------------------------------
 st.subheader("Top keywords by GMV")
@@ -902,7 +902,7 @@ by_keyword_city = agg["by_keyword_city"]
 if by_keyword_city.empty:
     st.caption("No keyword-level data in the current filter (many ad formats target by category, not keyword).")
 else:
-    st.dataframe(format_df_inr(by_keyword_city, ["gmv", "clicks", "conversions"]), use_container_width=True)
+    st.dataframe(format_df_inr(by_keyword_city, ["gmv", "clicks", "conversions"]), width='stretch')
 
 # --- Top search queries -------------------------------------------------------
 st.subheader("Top search queries by GMV")
@@ -912,7 +912,7 @@ by_search_query = agg["by_search_query"]
 if by_search_query.empty:
     st.caption("No search query data loaded yet - upload an IM_..._SEARCH_QUERY_*.csv file above.")
 else:
-    st.dataframe(format_df_inr(by_search_query, ["gmv", "clicks", "conversions"]), use_container_width=True)
+    st.dataframe(format_df_inr(by_search_query, ["gmv", "clicks", "conversions"]), width='stretch')
 
 # --- Campaign rollup ---------------------------------------------------------------
 st.subheader("Campaign performance (within current filters)")
@@ -920,7 +920,7 @@ by_campaign = agg["by_campaign"].copy()
 by_campaign["roi"] = (by_campaign["gmv"] / by_campaign["spend"]).round(2)
 money_cols = ["gmv", "spend", "impressions", "clicks", "conversions"]
 st.dataframe(format_df_inr(by_campaign.sort_values("gmv", ascending=False), money_cols),
-             use_container_width=True)
+             width='stretch')
 
 # --- Underperformers ---------------------------------------------------------
 st.subheader("Underperformers to look at")
@@ -933,7 +933,7 @@ if watchlist.empty:
 else:
     st.caption(f"Spending at/above the median (₹{format_inr(median_spend)}) but returning less than the "
                f"blended ROI ({blended_roi:.2f}x) - budget worth re-examining first.")
-    st.dataframe(format_df_inr(watchlist, money_cols), use_container_width=True)
+    st.dataframe(format_df_inr(watchlist, money_cols), width='stretch')
 
 # --- Spend vs outcome -------------------------------------------------------
 st.subheader("Spend vs GMV by campaign — does more spend pay off?")
@@ -964,10 +964,10 @@ trend = alt.Chart(by_campaign).transform_regression("spend", "gmv").mark_line(
 labels = alt.Chart(outlier_labels).mark_text(dy=-12, fontWeight="bold").encode(
     x="spend", y="gmv", text="campaign_name",
 )
-st.altair_chart((scatter + trend + labels).interactive(), use_container_width=True)
+st.altair_chart((scatter + trend + labels).interactive(), width='stretch')
 
 # --- Raw monthly summary export, if any has been loaded --------------------
 summary = load_summary_table(DB_VERSION)
 if not summary.empty:
     with st.expander("Raw monthly summary exports"):
-        st.dataframe(summary, use_container_width=True)
+        st.dataframe(summary, width='stretch')
