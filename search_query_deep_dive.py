@@ -369,13 +369,35 @@ def render(db_version, start_date, end_date, selected_campaigns, selected_cities
         "Shoppers landed but didn't buy — likely an intent mismatch. "
         "Strong candidates to pause or add to a negative-keyword list."
     )
-    zeroes = (kw[(kw["spend"] >= MEANINGFUL_SPEND) & (kw["conversions"] == 0) & (kw["clicks"] > 0)]
+    # Selectable spend floor - the default (Rs.100) is strict and often
+    # empty on smaller windows, so let the user relax the threshold to
+    # widen the net (or tighten it to prioritize only the loudest wastes).
+    ZERO_CONV_THRESHOLDS = {
+        "Any spend": 0,
+        "≥ ₹10": 10,
+        "≥ ₹50": 50,
+        f"≥ ₹{MEANINGFUL_SPEND} (default)": MEANINGFUL_SPEND,
+        "≥ ₹500": 500,
+        "≥ ₹1,000": 1000,
+    }
+    zero_conv_col1, zero_conv_col2 = st.columns([1, 3])
+    with zero_conv_col1:
+        zc_choice = st.selectbox(
+            "Min spend threshold", list(ZERO_CONV_THRESHOLDS.keys()),
+            index=3, key="zero_conv_threshold",
+            help="Lower this to surface smaller-spend keywords with zero conversions",
+        )
+    zc_min = ZERO_CONV_THRESHOLDS[zc_choice]
+    zeroes = (kw[(kw["spend"] >= zc_min) & (kw["conversions"] == 0) & (kw["clicks"] > 0)]
               .sort_values("spend", ascending=False)
-              .head(25)
+              .head(50)
               .copy())
     if zeroes.empty:
-        st.success("Every keyword with real spend converted at least once. Nice.")
+        st.success(f"Every keyword with ≥ ₹{zc_min:,} spend converted at least once. "
+                   "Try lowering the threshold to widen the search.")
     else:
+        st.caption(f"Showing {len(zeroes)} keyword-match combo(s) at this threshold "
+                   f"(total unrecovered spend ₹{format_inr(zeroes['spend'].sum())}).")
         display = zeroes[["keyword", "match", "spend", "clicks", "ctr", "cpa"]].rename(columns={
             "keyword": "Keyword", "match": "Match", "spend": "Spend",
             "clicks": "Clicks", "ctr": "CTR %", "cpa": "CPA",
