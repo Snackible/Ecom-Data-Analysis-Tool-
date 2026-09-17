@@ -144,6 +144,170 @@ def _head_to_head(db_version, start_date, end_date, campaigns, cities):
 
 
 @st.cache_data(show_spinner=False)
+def _search_query_overview(db_version, start_date, end_date, campaigns):
+    """Top-level search-query domain KPIs. Every value comes from a
+    single SQL rollup over the real search_query rows in the window -
+    no fabricated numbers, no filled-in placeholders."""
+    con = config.connect_db(read_only=True)
+    row = con.execute(f"""
+        SELECT
+            COUNT(DISTINCT search_query) AS unique_queries,
+            COUNT(DISTINCT CASE WHEN total_impressions > 0 THEN search_query END) AS queries_with_impressions,
+            COUNT(DISTINCT CASE WHEN total_clicks > 0 THEN search_query END) AS queries_with_clicks,
+            COUNT(DISTINCT CASE WHEN total_conversions > 0 THEN search_query END) AS queries_with_conv,
+            SUM(total_impressions) AS impressions,
+            SUM(total_clicks) AS clicks,
+            SUM(total_budget_burnt) AS spend,
+            SUM(total_conversions) AS conversions,
+            SUM(total_gmv) AS gmv,
+            SUM(CASE WHEN match_type = 'KEYWORD_MATCH_TYPE_BROAD' THEN total_budget_burnt END) AS broad_spend,
+            SUM(CASE WHEN match_type = 'KEYWORD_MATCH_TYPE_EXACT' THEN total_budget_burnt END) AS exact_spend,
+            SUM(CASE WHEN match_type = 'KEYWORD_MATCH_TYPE_BROAD' THEN total_gmv END) AS broad_gmv,
+            SUM(CASE WHEN match_type = 'KEYWORD_MATCH_TYPE_EXACT' THEN total_gmv END) AS exact_gmv
+        FROM search_query
+        WHERE metrics_date BETWEEN ? AND ?
+          AND campaign_name IN ({','.join(['?'] * len(campaigns))})
+          AND search_query IS NOT NULL
+    """, [start_date, end_date, *campaigns]).fetchone()
+    con.close()
+    return dict(
+        unique_queries=row[0] or 0,
+        queries_with_impressions=row[1] or 0,
+        queries_with_clicks=row[2] or 0,
+        queries_with_conv=row[3] or 0,
+        impressions=row[4] or 0, clicks=row[5] or 0,
+        spend=row[6] or 0, conversions=row[7] or 0, gmv=row[8] or 0,
+        broad_spend=row[9] or 0, exact_spend=row[10] or 0,
+        broad_gmv=row[11] or 0, exact_gmv=row[12] or 0,
+    )
+
+
+@st.cache_data(show_spinner=False)
+def _query_length_analysis(db_version, start_date, end_date, campaigns):
+    """Bucket every search query by word count. Long-tail (4+ words)
+    queries usually reflect stronger purchase intent than head terms,
+    so comparing ROI/conv-rate across buckets exposes whether the
+    broader-intent traffic is actually converting."""
+    con = config.connect_db(read_only=True)
+    df = con.execute(f"""
+        WITH per_q AS (
+            SELECT search_query,
+                   -- word count: split on whitespace and count non-empty parts
+                   len(str_split_regex(trim(search_query), '\\s+')) AS words,
+                   SUM(total_impressions) AS impressions,
+                   SUM(total_clicks) AS clicks,
+                   SUM(total_budget_burnt) AS spend,
+                   SUM(total_conversions) AS conversions,
+                   SUM(total_gmv) AS gmv
+            FROM search_query
+            WHERE metrics_date BETWEEN ? AND ?
+              AND campaign_name IN ({','.join(['?'] * len(campaigns))})
+              AND search_query IS NOT NULL AND trim(search_query) <> ''
+            GROUP BY search_query
+        )
+        SELECT
+            CASE
+              WHEN words = 1 THEN '1 word (head term)'
+              WHEN words = 2 THEN '2 words'
+              WHEN words = 3 THEN '3 words'
+              WHEN words BETWEEN 4 AND 5 THEN '4-5 words (long-tail)'
+              ELSE '6+ words (deep long-tail)'
+            END AS bucket,
+            CASE
+              WHEN words = 1 THEN 1 WHEN words = 2 THEN 2 WHEN words = 3 THEN 3
+              WHEN words BETWEEN 4 AND 5 THEN 4 ELSE 5 END AS sort_key,
+            COUNT(*) AS unique_queries,
+            SUM(impressions) AS impressions,
+            SUM(clicks) AS clicks,
+            SUM(spend) AS spend,
+            SUM(conversions) AS conversions,
+            SUM(gmv) AS gmv,
+            SUM(gmv) / NULLIF(SUM(spend), 0) AS roi,
+            100.0 * SUM(clicks) / NULLIF(SUM(impressions), 0) AS ctr,
+            100.0 * SUM(conversions) / NULLIF(SUM(clicks), 0) AS click_conv_rate
+        FROM per_q
+        GROUP BY bucket, sort_key
+        ORDER BY sort_key
+    """, [start_date, end_date, *campaigns]).fetchdf()
+    con.close()
+    return df
+
+
+@st.cache_data(show_spinner=False)
+def _intent_gap_queries(db_version, start_date, end_date, campaigns, min_spend):
+    """Broad-match queries where the actual search string shares few
+    words with the bid keyword - a signal that broad match expanded to
+    unrelated territory. Overlap uses simple word-set intersection over
+    union (Jaccard), which stays comparable across query lengths.
+
+    Only broad-match rows are considered - exact match by definition
+    has query == keyword, so intent gap doesn't apply."""
+    con = config.connect_db(read_only=True)
+    df = con.execute(f"""
+        WITH per_q AS (
+            SELECT search_query, keyword,
+                   SUM(total_impressions) AS impressions,
+                   SUM(total_clicks) AS clicks,
+                   SUM(total_budget_burnt) AS spend,
+                   SUM(total_conversions) AS conversions,
+                   SUM(total_gmv) AS gmv
+            FROM search_query
+            WHERE metrics_date BETWEEN ? AND ?
+              AND campaign_name IN ({','.join(['?'] * len(campaigns))})
+              AND search_query IS NOT NULL AND keyword IS NOT NULL
+              AND match_type = 'KEYWORD_MATCH_TYPE_BROAD'
+              AND trim(search_query) <> '' AND trim(keyword) <> ''
+            GROUP BY search_query, keyword
+            HAVING SUM(total_budget_burnt) >= {min_spend}
+        )
+        SELECT search_query, keyword, impressions, clicks, spend, conversions, gmv,
+               gmv / NULLIF(spend, 0) AS roi,
+               -- Jaccard similarity on the two lowercase word sets
+               (SELECT COUNT(*) FROM (
+                    SELECT unnest(str_split_regex(lower(trim(search_query)), '\\s+'))
+                    INTERSECT
+                    SELECT unnest(str_split_regex(lower(trim(keyword)), '\\s+'))
+               )) * 1.0 /
+               NULLIF((SELECT COUNT(*) FROM (
+                    SELECT unnest(str_split_regex(lower(trim(search_query)), '\\s+'))
+                    UNION
+                    SELECT unnest(str_split_regex(lower(trim(keyword)), '\\s+'))
+               )), 0) AS word_overlap
+        FROM per_q
+        ORDER BY word_overlap ASC, spend DESC
+        LIMIT 30
+    """, [start_date, end_date, *campaigns]).fetchdf()
+    con.close()
+    return df
+
+
+@st.cache_data(show_spinner=False)
+def _query_quadrants(db_version, start_date, end_date, campaigns, min_impressions):
+    """Every query rolled up with impressions + ROI, so the render layer
+    can plot the volume x value scatter and classify each into one of
+    four quadrants against the median lines."""
+    con = config.connect_db(read_only=True)
+    df = con.execute(f"""
+        SELECT search_query,
+               SUM(total_impressions) AS impressions,
+               SUM(total_clicks) AS clicks,
+               SUM(total_budget_burnt) AS spend,
+               SUM(total_conversions) AS conversions,
+               SUM(total_gmv) AS gmv,
+               SUM(total_gmv) / NULLIF(SUM(total_budget_burnt), 0) AS roi
+        FROM search_query
+        WHERE metrics_date BETWEEN ? AND ?
+          AND campaign_name IN ({','.join(['?'] * len(campaigns))})
+          AND search_query IS NOT NULL
+        GROUP BY search_query
+        HAVING SUM(total_impressions) >= {min_impressions}
+           AND SUM(total_budget_burnt) > 0
+    """, [start_date, end_date, *campaigns]).fetchdf()
+    con.close()
+    return df
+
+
+@st.cache_data(show_spinner=False)
 def _search_query_intelligence(db_version, start_date, end_date, campaigns):
     """Top and bottom actual search queries (what shoppers typed).
     search_query has no per-row city column (it has a city_count aggregate
@@ -228,6 +392,36 @@ def render(db_version, start_date, end_date, selected_campaigns, selected_cities
         "Match type performance (Broad vs Exact), keyword winners to scale, "
         "losers to pause, and search query intelligence. Sidebar filters apply."
     )
+
+    # === Classification methodology (always visible so nothing is a black box) ==
+    with st.expander("📖 Classification methodology — thresholds, formulas & what each label means", expanded=False):
+        st.markdown(f"""
+**All numbers on this page come directly from the DuckDB `granular` and `search_query` tables — nothing is estimated, sampled, or padded.** Definitions used everywhere below:
+
+**Core formulas (Instamart's own column names in parentheses):**
+- **ROI** = GMV ÷ Spend, where **Spend = `total_budget_burnt`** (actual money burnt, not the campaign budget cap `total_budget`) and **GMV = `total_gmv`** (attributed sales value).
+- **CTR** = `total_clicks` ÷ `total_impressions` × 100
+- **A2C rate** = `total_a2c` ÷ `total_clicks` × 100 (add-to-cart rate on clicks)
+- **Conversion rate (clicks→orders)** = `total_conversions` ÷ `total_clicks` × 100
+- **CPA** = `total_budget_burnt` ÷ `total_conversions` (cost per acquired order)
+
+**Meaningful-spend floor: ₹{MEANINGFUL_SPEND}.** Below this, ROI swings wildly on tiny sample sizes (a ₹5 spend and one ₹50 sale = 10x ROI but is not a real signal). Every recommendation table filters to ≥ this floor unless the user changes the selector for that section.
+
+**Grade buckets applied per (keyword × match type) combination:**
+- 🚀 **Winner:** ROI ≥ **{WINNER_ROI:.0f}x** with spend ≥ ₹{MEANINGFUL_SPEND}. Action: scale (raise bid or budget).
+- 🛑 **Loser:** ROI < **{LOSER_ROI:.0f}x** with spend ≥ ₹{MEANINGFUL_SPEND}. Action: pause, reduce bid, or switch broad → exact.
+- 🕳️ **Neg-keyword candidate:** spend ≥ threshold, clicks > 0, conversions = 0. Action: negative-keyword or pause.
+- ⚔️ **Match-type head-to-head:** same keyword ran in both BROAD and EXACT; winner decided by ROI, tie if within 15% of each other.
+
+**Match type values in the raw data:**
+- `KEYWORD_MATCH_TYPE_BROAD` → displayed as **Broad** (query auto-expanded to related terms — higher volume, lower intent).
+- `KEYWORD_MATCH_TYPE_EXACT` → displayed as **Exact** (query must match keyword — lower volume, higher intent).
+- `KEYWORD_MATCH_TYPE_INVALID` → displayed as **Other/None** (non-keyword targeting like category or product ads; excluded from keyword grading because there's no keyword to grade).
+
+**What "search query" actually means:** the literal text a shopper typed into the Instamart search bar, as recorded in the Search Query Report. Distinct from **keyword**, which is what *you* bid on. On broad match these two can differ significantly — that gap is the "intent-gap" analysis below.
+
+**Filter scope:** every section respects the sidebar's date range and campaign filter. City filter applies to the `granular`-derived sections (keyword grades, product×keyword). It does NOT apply to `search_query`-derived sections because the search query report ships with an aggregate `city_count` per row instead of one row per city — filtering by a subset of cities would double-count.
+""")
 
     campaigns = tuple(selected_campaigns)
     cities = tuple(selected_cities)
@@ -453,14 +647,297 @@ def render(db_version, start_date, end_date, selected_campaigns, selected_cities
     # === Search-query-level intelligence (what shoppers actually typed) ====
     st.subheader("🎯 Search query intelligence — what shoppers actually typed")
     st.caption(
-        "From the Search Query Report. City filter doesn't apply here "
-        "(that report only has an aggregate city_count column)."
+        "Everything below is computed directly from the **Search Query Report** "
+        "(`search_query` table) — the literal text shoppers typed into Instamart. "
+        "City filter doesn't apply here (report ships with `city_count` aggregate)."
     )
+
+    # ---- 7A. Overview KPIs -------------------------------------------------
+    st.markdown("##### Overview")
+    ov = _search_query_overview(db_version, start_date, end_date, campaigns)
+    if ov["unique_queries"] == 0:
+        st.warning("No search query data in the current filters.")
+    else:
+        blended_roi = ov["gmv"] / ov["spend"] if ov["spend"] else 0
+        conv_pct = ov["queries_with_conv"] / ov["queries_with_clicks"] * 100 if ov["queries_with_clicks"] else 0
+        broad_pct = ov["broad_spend"] / ov["spend"] * 100 if ov["spend"] else 0
+        broad_roi = ov["broad_gmv"] / ov["broad_spend"] if ov["broad_spend"] else 0
+        exact_roi = ov["exact_gmv"] / ov["exact_spend"] if ov["exact_spend"] else 0
+
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        for col, (label, value, sub) in zip(
+            [c1, c2, c3, c4, c5, c6],
+            [
+                ("Unique queries", f"{ov['unique_queries']:,}",
+                 f"{ov['queries_with_clicks']:,} got clicks"),
+                ("Spend", f"₹{format_inr(ov['spend'])}",
+                 f"{broad_pct:.0f}% broad · {100-broad_pct:.0f}% exact"),
+                ("GMV", f"₹{format_inr(ov['gmv'])}",
+                 f"{ov['conversions']:,} orders"),
+                ("Blended ROI", f"{blended_roi:.2f}x",
+                 f"Broad {broad_roi:.2f}x · Exact {exact_roi:.2f}x"),
+                ("% queries that converted",
+                 f"{conv_pct:.1f}%",
+                 f"{ov['queries_with_conv']:,} of {ov['queries_with_clicks']:,} clicked queries"),
+                ("Impr. → Click",
+                 f"{ov['clicks']/ov['impressions']*100:.2f}%" if ov['impressions'] else "—",
+                 f"{ov['impressions']:,} impressions total"),
+            ],
+        ):
+            with col:
+                st.markdown(
+                    f'<div class="kpi-card"><div class="kpi-label">{label}</div>'
+                    f'<div class="kpi-value">{value}</div>'
+                    f'<div class="kpi-sub">{sub}</div></div>',
+                    unsafe_allow_html=True,
+                )
+
+        # Narrative interpretation of the KPIs (all numbers pulled from ov)
+        interpretation_bits = []
+        if broad_pct > 55:
+            interpretation_bits.append(
+                f"**{broad_pct:.0f}% of search-query spend is going to broad match.** "
+                "Broad expands your bid keyword to related terms — good for discovery, "
+                "but you pay for the intent mismatch too. See the intent-gap section below.")
+        elif broad_pct < 30:
+            interpretation_bits.append(
+                f"Only **{broad_pct:.0f}% of spend is on broad match** — you're already "
+                "leaning heavily on exact. If growth is stalling, controlled broad on "
+                "your top keywords can surface new query patterns to graduate to exact.")
+        if exact_roi > broad_roi * 1.2 and ov["broad_spend"] > 0:
+            interpretation_bits.append(
+                f"**Exact ROI ({exact_roi:.2f}x) is {(exact_roi/broad_roi - 1)*100:.0f}% "
+                f"better than broad ({broad_roi:.2f}x).** Every rupee shifted from broad "
+                "to exact should return more, up to the point exact stops scaling.")
+        elif broad_roi > exact_roi * 1.2:
+            interpretation_bits.append(
+                f"**Broad ROI ({broad_roi:.2f}x) is beating exact ({exact_roi:.2f}x).** "
+                "Unusual — usually means your exact keyword coverage is too narrow. "
+                "Look at the winning broad-match queries below and add them as new exact keywords.")
+        if conv_pct < 20:
+            interpretation_bits.append(
+                f"Only **{conv_pct:.0f}% of clicked queries converted** — the other "
+                f"{100-conv_pct:.0f}% saw your ad, clicked, and left without buying. "
+                "That's the negative-keyword and product-mismatch opportunity.")
+        if interpretation_bits:
+            st.info("**What this means:** " + "  \n\n".join(interpretation_bits))
+
+    st.markdown("---")
+
+    # ---- 7B. Query length (long-tail) -------------------------------------
+    st.markdown("##### Query length — head terms vs long-tail")
+    st.caption(
+        "Buckets every unique query by word count. Rule of thumb: longer queries "
+        "usually reflect stronger purchase intent (shopper knows exactly what they want), "
+        "while 1-2 word head terms are cheaper per impression but noisier."
+    )
+    ql = _query_length_analysis(db_version, start_date, end_date, campaigns)
+    if not ql.empty:
+        ql_display = ql[["bucket", "unique_queries", "impressions", "clicks", "spend",
+                         "conversions", "gmv", "roi", "ctr", "click_conv_rate"]].copy()
+        for c in ["roi"]:
+            ql_display[c] = ql_display[c].round(2)
+        for c in ["ctr", "click_conv_rate"]:
+            ql_display[c] = ql_display[c].round(1)
+        ql_display = ql_display.rename(columns={
+            "bucket": "Bucket", "unique_queries": "Unique queries",
+            "impressions": "Impressions", "clicks": "Clicks",
+            "spend": "Spend", "conversions": "Conv", "gmv": "GMV",
+            "roi": "ROI", "ctr": "CTR %", "click_conv_rate": "Click→Conv %",
+        })
+        st.dataframe(format_df_inr(ql_display, ["Spend", "GMV"]),
+                     width='stretch', hide_index=True)
+
+        # Compare short vs long-tail
+        head = ql[ql["sort_key"].isin([1, 2])]
+        tail = ql[ql["sort_key"].isin([4, 5])]
+        head_roi = head["gmv"].sum() / head["spend"].sum() if head["spend"].sum() else 0
+        tail_roi = tail["gmv"].sum() / tail["spend"].sum() if tail["spend"].sum() else 0
+        head_spend = head["spend"].sum()
+        tail_spend = tail["spend"].sum()
+        insights = []
+        if head_roi and tail_roi:
+            if tail_roi > head_roi * 1.3:
+                insights.append(
+                    f"**Long-tail (4+ words) ROI is {tail_roi:.2f}x vs head-term (1-2 words) {head_roi:.2f}x** "
+                    f"— long-tail is {(tail_roi/head_roi-1)*100:.0f}% more efficient. "
+                    "You're currently spending ₹{spend_ht:,.0f} on head terms vs ₹{spend_lt:,.0f} on long-tail. "
+                    "Consider shifting some head-term budget to long-tail expansion.".format(
+                        spend_ht=head_spend, spend_lt=tail_spend))
+            elif head_roi > tail_roi * 1.3:
+                insights.append(
+                    f"**Head terms ({head_roi:.2f}x ROI) are actually outperforming long-tail ({tail_roi:.2f}x).** "
+                    "Unusual pattern — suggests your long-tail bids are landing on niche queries "
+                    "with low conversion volume. Investigate the specific 4+ word queries below.")
+            else:
+                insights.append(
+                    f"Head vs long-tail ROI are within 30% of each other "
+                    f"({head_roi:.2f}x vs {tail_roi:.2f}x). Neither bucket is being starved.")
+        # Highlight the sweet-spot bucket
+        best = ql.loc[ql["roi"].idxmax()] if not ql["roi"].isna().all() else None
+        if best is not None:
+            insights.append(
+                f"Best-performing bucket by ROI: **{best['bucket']}** at {best['roi']:.2f}x "
+                f"across {int(best['unique_queries']):,} queries.")
+        if insights:
+            st.info("**What this means:** " + "  \n\n".join(insights))
+
+    st.markdown("---")
+
+    # ---- 7C. Query-keyword intent gap (broad match waste detector) ---------
+    st.markdown("##### Broad-match intent gap — where broad expanded too far")
+    st.caption(
+        "For every broad-match row, we compute the word overlap between the **actual "
+        "query the shopper typed** and the **keyword you bid on**, using Jaccard similarity "
+        "(shared words ÷ total unique words). Overlap **0.0** = the two share no common "
+        "words at all — broad match matched them on the *underlying category* or "
+        "*misspelling correction*, not shared vocabulary. Overlap **1.0** = identical."
+    )
+    with st.container():
+        gap_col1, gap_col2 = st.columns([1, 3])
+        with gap_col1:
+            gap_min_spend = st.selectbox(
+                "Min spend on broad-match query", [10, 50, 100, 500, 1000],
+                index=2, key="intent_gap_min",
+                help="Only rank queries that have spent at least this much on broad match",
+            )
+    ig = _intent_gap_queries(db_version, start_date, end_date, campaigns, gap_min_spend)
+    if ig.empty:
+        st.info(f"No broad-match queries with ≥ ₹{gap_min_spend} spend in the current filters.")
+    else:
+        ig_display = ig.copy()
+        ig_display["roi"] = ig_display["roi"].round(2)
+        ig_display["word_overlap"] = (ig_display["word_overlap"] * 100).round(0).astype(int).astype(str) + "%"
+        ig_display = ig_display.rename(columns={
+            "search_query": "Actual query", "keyword": "Your bid keyword",
+            "impressions": "Impr.", "clicks": "Clicks", "spend": "Spend",
+            "conversions": "Conv", "gmv": "GMV", "roi": "ROI",
+            "word_overlap": "Word overlap",
+        })
+        st.dataframe(format_df_inr(ig_display, ["Spend", "GMV"]),
+                     width='stretch', hide_index=True, height=420)
+
+        # Concrete recommendations from the top offender + aggregate
+        n_zero_overlap = (ig["word_overlap"] == 0).sum()
+        zero_overlap_spend = ig[ig["word_overlap"] == 0]["spend"].sum()
+        zero_overlap_gmv = ig[ig["word_overlap"] == 0]["gmv"].sum()
+        zero_overlap_roi = zero_overlap_gmv / zero_overlap_spend if zero_overlap_spend else 0
+        gap_insights = []
+        if n_zero_overlap > 0:
+            gap_insights.append(
+                f"**{n_zero_overlap} broad-match query/keyword pairs share ZERO words** "
+                f"(total spend ₹{format_inr(zero_overlap_spend)}, ROI {zero_overlap_roi:.2f}x). "
+                "These are the clearest broad-match expansion cases. If ROI is above your "
+                "target, keep the broad match — the algorithm found paying customers you'd have "
+                "missed. If ROI is below target, either add those queries as **new exact-match "
+                "keywords** (to control bids), or as **negative keywords** (to stop the spend)."
+            )
+        top = ig.iloc[0]
+        gap_insights.append(
+            f"**Top offender:** shopper typed *\"{top['search_query']}\"* while you were bidding "
+            f"on *\"{top['keyword']}\"* — {int(top['word_overlap']*100)}% word overlap, "
+            f"₹{format_inr(top['spend'])} spent, {int(top['conversions'])} order(s), "
+            f"ROI {top['roi']:.2f}x. "
+            + ("Since it's converting, treat this as a **new exact keyword to graduate**."
+               if top["roi"] >= WINNER_ROI else
+               ("It's losing money — add as **negative keyword** on this campaign."
+                if top["roi"] < LOSER_ROI else
+                "Marginal — worth tightening the match type or lowering the bid."))
+        )
+        st.info("**What this means:** " + "  \n\n".join(gap_insights))
+
+    st.markdown("---")
+
+    # ---- 7D. Volume × ROI quadrants ---------------------------------------
+    st.markdown("##### Volume × ROI quadrants — which queries deserve which action")
+    st.caption(
+        "Each dot is one unique search query with ≥ 10 impressions. "
+        "Median impressions and median ROI (across the filtered queries) form the axes. "
+        "Each of the four quadrants maps to a specific playbook."
+    )
+    qd = _query_quadrants(db_version, start_date, end_date, campaigns, min_impressions=10)
+    if qd.empty:
+        st.info("Not enough query volume in the current filters to plot quadrants.")
+    else:
+        med_impr = float(qd["impressions"].median())
+        med_roi = float(qd["roi"].median())
+        qd = qd.copy()
+        qd["quadrant"] = qd.apply(
+            lambda r: (
+                "🚀 Scale (high vol · high ROI)" if r["impressions"] >= med_impr and r["roi"] >= med_roi
+                else "🌱 Hidden gem (low vol · high ROI)" if r["roi"] >= med_roi
+                else "💸 Money drain (high vol · low ROI)" if r["impressions"] >= med_impr
+                else "🪦 Prune (low vol · low ROI)"
+            ), axis=1,
+        )
+        quadrant_colors = {
+            "🚀 Scale (high vol · high ROI)":       accents["green"]["fg"],
+            "🌱 Hidden gem (low vol · high ROI)":   accents["blue"]["fg"],
+            "💸 Money drain (high vol · low ROI)":  accents["red"]["fg"],
+            "🪦 Prune (low vol · low ROI)":         accents["amber"]["fg"],
+        }
+        scatter = alt.Chart(qd).mark_circle(size=40, opacity=0.55).encode(
+            x=alt.X("impressions:Q", scale=alt.Scale(type="log"),
+                    title="Impressions (log scale)"),
+            y=alt.Y("roi:Q", scale=alt.Scale(clamp=True, domain=[0, max(10, qd["roi"].quantile(0.98))]),
+                    title="ROI (GMV / Spend)"),
+            color=alt.Color("quadrant:N",
+                            scale=alt.Scale(domain=list(quadrant_colors.keys()),
+                                            range=list(quadrant_colors.values())),
+                            legend=alt.Legend(title=None, orient="top", columns=2)),
+            tooltip=[
+                alt.Tooltip("search_query:N", title="Query"),
+                alt.Tooltip("impressions:Q", format=",.0f"),
+                alt.Tooltip("clicks:Q", format=",.0f"),
+                alt.Tooltip("spend:Q", format=",.0f", title="Spend ₹"),
+                alt.Tooltip("gmv:Q", format=",.0f", title="GMV ₹"),
+                alt.Tooltip("roi:Q", format=".2f", title="ROI"),
+                alt.Tooltip("conversions:Q", format=",.0f", title="Conv"),
+                alt.Tooltip("quadrant:N"),
+            ],
+        )
+        med_lines = (alt.Chart(pd.DataFrame({"impr": [med_impr], "roi": [med_roi]}))
+                     .mark_rule(strokeDash=[4, 4], color=accents["amber"]["fg"])
+                     .encode(x="impr:Q") +
+                     alt.Chart(pd.DataFrame({"impr": [med_impr], "roi": [med_roi]}))
+                     .mark_rule(strokeDash=[4, 4], color=accents["amber"]["fg"])
+                     .encode(y="roi:Q"))
+        st.altair_chart((scatter + med_lines).properties(height=340), width='stretch')
+
+        # Counts + total-spend per quadrant + prescription
+        q_summary = (qd.groupby("quadrant")
+                     .agg(queries=("search_query", "count"),
+                          spend=("spend", "sum"),
+                          gmv=("gmv", "sum"))
+                     .reset_index())
+        q_summary["ROI"] = (q_summary["gmv"] / q_summary["spend"].replace(0, pd.NA)).round(2)
+        q_display = q_summary[["quadrant", "queries", "spend", "gmv", "ROI"]].rename(columns={
+            "quadrant": "Quadrant", "queries": "# queries",
+            "spend": "Spend", "gmv": "GMV",
+        })
+        st.dataframe(format_df_inr(q_display, ["Spend", "GMV"]),
+                     width='stretch', hide_index=True)
+        st.markdown(f"""
+**Playbook (what to do with each quadrant):**
+- 🚀 **Scale** — high volume, ROI above the median. These are your workhorses. Raise bids or budget to capture more impression share.
+- 🌱 **Hidden gems** — low volume but great ROI. Add them as exact-match keywords, raise bids to grow their share, or write dedicated ad creative for them.
+- 💸 **Money drains** — high volume, ROI below the median. Highest-priority intervention. Options: negative keyword, tighter match type, lower bid, or fix landing page.
+- 🪦 **Prune** — low volume, low ROI. Low priority individually but they add up. Bulk-pause anything with < ₹50 GMV.
+
+_(Median impressions cutoff for this window: **{med_impr:,.0f}** · median ROI: **{med_roi:.2f}x**.)_
+""")
+
+    st.markdown("---")
+
+    # ---- 7E. Top converters + wasted spend (kept as before, side by side) ---
+    st.markdown("##### Top converters & wasted spend")
+    st.caption("Two tables side-by-side — the queries that are paying off, and the queries "
+               "with meaningful spend but zero orders (the negative-keyword shortlist).")
     top_q, waste_q = _search_query_intelligence(db_version, start_date, end_date, campaigns)
 
     t_col, w_col = st.columns(2)
     with t_col:
-        st.markdown("**Top converting queries (drive most GMV)**")
+        st.markdown("**Top converting queries (top 30 by GMV)**")
         if top_q.empty:
             st.caption("No search query data in the current filters.")
         else:
