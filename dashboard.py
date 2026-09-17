@@ -230,9 +230,26 @@ html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
 .stApp p, .stApp span, .stApp label, .stApp li, .stApp div {{ color: var(--text); }}
 [data-testid="stMarkdownContainer"] p {{ font-size: 13px; color: var(--text2); }}
 
-/* Hide Streamlit chrome so the topbar starts flush with the page */
-[data-testid="stHeader"], [data-testid="stToolbar"], #MainMenu, footer {{
-  background: var(--bg) !important; height: 0 !important; visibility: hidden;
+/* Hide the specific unwanted toolbar children (deploy button, main
+   menu, decoration bar, footer) WITHOUT hiding the toolbar wrapper
+   itself - because stExpandSidebarButton (the pop-out that reopens
+   a collapsed sidebar) lives inside stToolbar, and hiding the
+   toolbar traps the user in the collapsed state. */
+[data-testid="stAppDeployButton"], [data-testid="stMainMenu"],
+[data-testid="stStatusWidget"], [data-testid="stDecoration"],
+#MainMenu, footer {{
+  visibility: hidden !important; display: none !important; height: 0 !important;
+}}
+[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stToolbarActions"] {{
+  background: transparent !important;
+}}
+/* Force the sidebar collapse chevron AND the pop-out reopen button
+   visible + clickable regardless of theme/state. */
+[data-testid="stSidebarCollapseButton"],
+[data-testid="stSidebarCollapseButton"] button,
+[data-testid="stExpandSidebarButton"] {{
+  visibility: visible !important; display: flex !important; opacity: 1 !important;
+  color: var(--text) !important; z-index: 1000; pointer-events: auto !important;
 }}
 [data-testid="stAppViewContainer"] > .main > .block-container {{
   padding: 20px 24px 60px !important; max-width: none;
@@ -605,6 +622,323 @@ def load_summary_table(version: float) -> pd.DataFrame:
         con.close()
 
 
+@st.cache_data(show_spinner=False, max_entries=50)
+def load_product_deep_dive(version: float, product_name: str, start_date, end_date,
+                           campaigns: tuple, cities: tuple) -> dict:
+    """Per-product deep breakdown used by the AI-insights expander. Each
+    sub-query runs against the granular table, filtered to this one
+    product + the active sidebar filters. All numbers are direct SQL
+    rollups - nothing derived or estimated.
+
+    Returns a dict of DataFrames + scalar totals so the render code can
+    weave them into the WHY/HOW/WHOM/CAUSE narrative without another
+    round-trip to the DB."""
+    con = config.connect_db()
+    try:
+        camp_ph = ",".join(["?"] * len(campaigns))
+        city_ph = ",".join(["?"] * len(cities))
+        params = [start_date, end_date, product_name, *campaigns, *cities]
+        where = (f"metrics_date BETWEEN ? AND ? AND product_name = ? "
+                 f"AND campaign_name IN ({camp_ph}) AND city IN ({city_ph})")
+
+        totals = con.execute(f"""
+            SELECT SUM(total_impressions) impressions, SUM(total_clicks) clicks,
+                   SUM(total_budget_burnt) spend, SUM(total_a2c) a2c,
+                   SUM(total_conversions) conv, SUM(total_gmv) gmv,
+                   COUNT(DISTINCT city) n_cities,
+                   COUNT(DISTINCT keyword) n_keywords,
+                   COUNT(DISTINCT ad_property) n_formats
+            FROM granular WHERE {where}
+        """, params).fetchone()
+
+        by_city = con.execute(f"""
+            SELECT city, SUM(total_budget_burnt) spend, SUM(total_gmv) gmv,
+                   SUM(total_conversions) conv,
+                   SUM(total_gmv) / NULLIF(SUM(total_budget_burnt),0) roi
+            FROM granular WHERE {where}
+            GROUP BY city HAVING SUM(total_budget_burnt) > 0
+            ORDER BY gmv DESC
+        """, params).fetchdf()
+
+        by_keyword = con.execute(f"""
+            SELECT keyword, match_type, SUM(total_budget_burnt) spend,
+                   SUM(total_gmv) gmv, SUM(total_conversions) conv,
+                   SUM(total_gmv) / NULLIF(SUM(total_budget_burnt),0) roi
+            FROM granular WHERE {where} AND keyword IS NOT NULL
+            GROUP BY keyword, match_type HAVING SUM(total_budget_burnt) > 0
+            ORDER BY spend DESC
+        """, params).fetchdf()
+
+        by_format = con.execute(f"""
+            SELECT ad_property, SUM(total_budget_burnt) spend, SUM(total_gmv) gmv,
+                   SUM(total_conversions) conv,
+                   SUM(total_gmv) / NULLIF(SUM(total_budget_burnt),0) roi
+            FROM granular WHERE {where}
+            GROUP BY ad_property HAVING SUM(total_budget_burnt) > 0
+            ORDER BY spend DESC
+        """, params).fetchdf()
+
+        by_match = con.execute(f"""
+            SELECT match_type, SUM(total_budget_burnt) spend, SUM(total_gmv) gmv,
+                   SUM(total_conversions) conv,
+                   SUM(total_gmv) / NULLIF(SUM(total_budget_burnt),0) roi
+            FROM granular WHERE {where}
+            GROUP BY match_type HAVING SUM(total_budget_burnt) > 0
+            ORDER BY spend DESC
+        """, params).fetchdf()
+
+        daily = con.execute(f"""
+            SELECT metrics_date, SUM(total_budget_burnt) spend, SUM(total_gmv) gmv,
+                   SUM(total_gmv) / NULLIF(SUM(total_budget_burnt),0) roi
+            FROM granular WHERE {where}
+            GROUP BY metrics_date ORDER BY metrics_date
+        """, params).fetchdf()
+
+        # Product-universe averages (same filter window, all products) so
+        # WHY/CAUSE lines can compare this product to peers, not just the
+        # blended dashboard number.
+        peer = con.execute(f"""
+            SELECT 100.0*SUM(total_clicks)/NULLIF(SUM(total_impressions),0) avg_ctr,
+                   100.0*SUM(total_a2c)/NULLIF(SUM(total_clicks),0) avg_a2c_rate,
+                   100.0*SUM(total_conversions)/NULLIF(SUM(total_a2c),0) avg_conv_rate,
+                   SUM(total_budget_burnt)/NULLIF(SUM(total_conversions),0) avg_cpa
+            FROM granular
+            WHERE metrics_date BETWEEN ? AND ? AND product_name IS NOT NULL
+              AND campaign_name IN ({camp_ph}) AND city IN ({city_ph})
+        """, [start_date, end_date, *campaigns, *cities]).fetchone()
+    finally:
+        con.close()
+
+    return dict(
+        totals=dict(impressions=totals[0] or 0, clicks=totals[1] or 0,
+                    spend=totals[2] or 0, a2c=totals[3] or 0,
+                    conv=totals[4] or 0, gmv=totals[5] or 0,
+                    n_cities=totals[6] or 0, n_keywords=totals[7] or 0,
+                    n_formats=totals[8] or 0),
+        by_city=by_city, by_keyword=by_keyword, by_format=by_format,
+        by_match=by_match, daily=daily,
+        peer=dict(ctr=peer[0] or 0, a2c_rate=peer[1] or 0,
+                  conv_rate=peer[2] or 0, cpa=peer[3] or 0),
+    )
+
+
+MATCH_LABEL_SHORT = {
+    "KEYWORD_MATCH_TYPE_BROAD": "Broad",
+    "KEYWORD_MATCH_TYPE_EXACT": "Exact",
+    "KEYWORD_MATCH_TYPE_INVALID": "Other/None",
+}
+
+
+def render_product_deep_dive(product_name: str, row: pd.Series, blended_roi: float,
+                              start_date, end_date, campaigns: tuple, cities: tuple) -> None:
+    """Render the WHY / HOW / WHOM / CAUSE / RECOMMENDATION deep dive for
+    one product inside its AI-insight expander. Every claim is grounded
+    in the DataFrames returned by load_product_deep_dive() - if the data
+    doesn't support a claim, it isn't shown.
+
+    `row` carries this product's aggregated ROI/conv_rate/deviation from
+    the outer AI-insights table so the calling loop doesn't re-query."""
+    d = load_product_deep_dive(DB_VERSION, product_name, start_date, end_date, campaigns, cities)
+    t, peer = d["totals"], d["peer"]
+    if t["spend"] == 0:
+        st.caption("No spend on this product in the current filters.")
+        return
+
+    good = row["deviation"] >= 0
+    ctr = 100 * t["clicks"] / t["impressions"] if t["impressions"] else 0
+    a2c_rate = 100 * t["a2c"] / t["clicks"] if t["clicks"] else 0
+    click_conv = 100 * t["conv"] / t["clicks"] if t["clicks"] else 0
+    a2c_conv = 100 * t["conv"] / t["a2c"] if t["a2c"] else 0
+    cpa = t["spend"] / t["conv"] if t["conv"] else 0
+
+    def cmp(v, avg, higher_is_better=True):
+        """Return '(X% above/below peer average)' phrase."""
+        if avg == 0 or pd.isna(avg): return ""
+        diff = (v - avg) / avg * 100
+        direction = "above" if diff > 0 else "below"
+        sign = (diff > 0) == higher_is_better
+        return f"({abs(diff):.0f}% {direction} peer avg — {'strong' if sign else 'weak'})"
+
+    # === WHAT (the facts, no interpretation) =============================
+    st.markdown("**📊 WHAT is happening**")
+    st.markdown(
+        f"- **ROI:** {row['roi']:.2f}x vs blended {blended_roi:.2f}x "
+        f"({'+' if good else ''}{row['deviation']:.2f}x deviation)  \n"
+        f"- **Money flow:** ₹{format_inr(t['spend'])} spend → ₹{format_inr(t['gmv'])} GMV "
+        f"→ {int(t['conv']):,} orders  \n"
+        f"- **Funnel:** {int(t['impressions']):,} impr → {int(t['clicks']):,} clicks "
+        f"({ctr:.2f}% CTR) → {int(t['a2c']):,} carts ({a2c_rate:.1f}% A2C) "
+        f"→ {int(t['conv']):,} orders ({a2c_conv:.1f}% cart-to-order)  \n"
+        f"- **CPA:** ₹{format_inr(cpa, 0) if cpa else '—'} per order  \n"
+        f"- **Distribution:** ran in **{t['n_cities']} cities**, "
+        f"across **{t['n_keywords']} keywords** and **{t['n_formats']} ad formats**"
+    )
+
+    # === WHY (comparison to peer averages) ===============================
+    st.markdown("**❓ WHY it's " + ("outperforming" if good else "underperforming") + " the blended average**")
+    why_lines = []
+    why_lines.append(
+        f"- **CTR** {ctr:.2f}% vs peer {peer['ctr']:.2f}% {cmp(ctr, peer['ctr'])}"
+    )
+    why_lines.append(
+        f"- **A2C rate** {a2c_rate:.1f}% vs peer {peer['a2c_rate']:.1f}% {cmp(a2c_rate, peer['a2c_rate'])}"
+    )
+    why_lines.append(
+        f"- **Cart→Order conversion** {a2c_conv:.1f}% vs peer {peer['conv_rate']:.1f}% {cmp(a2c_conv, peer['conv_rate'])}"
+    )
+    if cpa and peer["cpa"]:
+        why_lines.append(
+            f"- **CPA** ₹{format_inr(cpa)} vs peer ₹{format_inr(peer['cpa'])} "
+            f"{cmp(cpa, peer['cpa'], higher_is_better=False)}"
+        )
+    st.markdown("  \n".join(why_lines))
+
+    # === HOW (mechanics - what's driving the spend & GMV) ================
+    st.markdown("**⚙️ HOW the performance is being made (top drivers)**")
+    how_col1, how_col2 = st.columns(2)
+    with how_col1:
+        st.markdown("*Top cities by GMV:*")
+        top_cities = d["by_city"].head(5).copy()
+        if not top_cities.empty:
+            top_cities["roi"] = top_cities["roi"].round(2)
+            top_cities = top_cities.rename(columns={"city": "City", "spend": "Spend",
+                                                    "gmv": "GMV", "conv": "Conv", "roi": "ROI"})
+            st.dataframe(format_df_inr(top_cities, ["Spend", "GMV"]),
+                         width='stretch', hide_index=True, height=210)
+    with how_col2:
+        st.markdown("*Top keywords by spend:*")
+        top_kw = d["by_keyword"].head(5).copy()
+        if not top_kw.empty:
+            top_kw["roi"] = top_kw["roi"].round(2)
+            top_kw["match_type"] = top_kw["match_type"].map(MATCH_LABEL_SHORT).fillna(top_kw["match_type"])
+            top_kw = top_kw.rename(columns={"keyword": "Keyword", "match_type": "Match",
+                                            "spend": "Spend", "gmv": "GMV", "conv": "Conv", "roi": "ROI"})
+            st.dataframe(format_df_inr(top_kw, ["Spend", "GMV"]),
+                         width='stretch', hide_index=True, height=210)
+
+    # Format + match-type breakdown
+    fm_col1, fm_col2 = st.columns(2)
+    with fm_col1:
+        st.markdown("*Ad-format mix:*")
+        fmt = d["by_format"].copy()
+        if not fmt.empty:
+            fmt["% of spend"] = (fmt["spend"] / fmt["spend"].sum() * 100).round(1)
+            fmt["roi"] = fmt["roi"].round(2)
+            fmt = fmt[["ad_property", "spend", "gmv", "roi", "% of spend"]].rename(columns={
+                "ad_property": "Format", "spend": "Spend", "gmv": "GMV", "roi": "ROI",
+            })
+            st.dataframe(format_df_inr(fmt, ["Spend", "GMV"]),
+                         width='stretch', hide_index=True, height=180)
+    with fm_col2:
+        st.markdown("*Match-type mix:*")
+        mm = d["by_match"].copy()
+        if not mm.empty:
+            mm["match_type"] = mm["match_type"].map(MATCH_LABEL_SHORT).fillna(mm["match_type"])
+            mm["% of spend"] = (mm["spend"] / mm["spend"].sum() * 100).round(1)
+            mm["roi"] = mm["roi"].round(2)
+            mm = mm[["match_type", "spend", "gmv", "roi", "% of spend"]].rename(columns={
+                "match_type": "Match", "spend": "Spend", "gmv": "GMV", "roi": "ROI",
+            })
+            st.dataframe(format_df_inr(mm, ["Spend", "GMV"]),
+                         width='stretch', hide_index=True, height=180)
+
+    # === WHOM (audience concentration) ===================================
+    if not d["by_city"].empty:
+        st.markdown("**🎯 WHOM it's reaching (audience concentration)**")
+        n_cities_active = len(d["by_city"])
+        top5_share = d["by_city"].head(5)["gmv"].sum() / d["by_city"]["gmv"].sum() * 100 if d["by_city"]["gmv"].sum() else 0
+        one_share = d["by_city"].iloc[0]["gmv"] / d["by_city"]["gmv"].sum() * 100 if d["by_city"]["gmv"].sum() else 0
+        top_city = d["by_city"].iloc[0]["city"]
+        concentration = (
+            f"- Active in **{n_cities_active} cities** with spend  \n"
+            f"- **{top_city}** alone drives **{one_share:.1f}%** of GMV; "
+            f"top 5 cities = **{top5_share:.1f}%** of GMV"
+        )
+        st.markdown(concentration)
+        if one_share > 40:
+            st.warning(f"⚠️ Heavily concentrated in {top_city} — a single-city dependency. "
+                       "GMV is fragile to any change in that market (delivery, competition, stock).")
+        elif top5_share < 40 and n_cities_active > 10:
+            st.info(f"✅ Well diversified — spread across {n_cities_active} cities with no single hotspot.")
+
+    # === CAUSE (root-cause hypothesis based on the funnel shape) ==========
+    st.markdown("**🧭 CAUSE — most likely root of this deviation**")
+    causes = []
+    if ctr < peer["ctr"] * 0.75 and peer["ctr"] > 0:
+        causes.append("**Low CTR vs peers** → ad creative or product image isn't drawing the click. "
+                      "The product isn't losing at conversion; it's losing at first-impression appeal.")
+    if a2c_rate < peer["a2c_rate"] * 0.75 and peer["a2c_rate"] > 0:
+        causes.append("**Low A2C rate** → shoppers click but don't add to cart. Usually a price/pack-size "
+                      "issue, unclear listing, or the landing card fails to reinforce the ad promise.")
+    if a2c_conv < peer["conv_rate"] * 0.75 and peer["conv_rate"] > 0 and t["a2c"] > 0:
+        causes.append("**Low cart-to-order conversion** → shoppers add to cart but abandon. "
+                      "Likely delivery friction, cart-level minimums, or a competing product in the same cart won.")
+    # Broad-heavy waste?
+    if not d["by_match"].empty:
+        broad_row = d["by_match"][d["by_match"]["match_type"] == "KEYWORD_MATCH_TYPE_BROAD"]
+        exact_row = d["by_match"][d["by_match"]["match_type"] == "KEYWORD_MATCH_TYPE_EXACT"]
+        if not broad_row.empty and not exact_row.empty:
+            br, ex = broad_row.iloc[0]["roi"] or 0, exact_row.iloc[0]["roi"] or 0
+            broad_pct = broad_row.iloc[0]["spend"] / d["by_match"]["spend"].sum() * 100
+            if broad_pct > 60 and br < ex * 0.7:
+                causes.append(
+                    f"**Broad match is eating budget** — {broad_pct:.0f}% of this product's spend is on broad "
+                    f"({br:.2f}x ROI) while exact returns {ex:.2f}x. Broad expansion is dragging efficiency down."
+                )
+    # Concentrated in one keyword?
+    if not d["by_keyword"].empty and len(d["by_keyword"]) > 1:
+        top_kw_share = d["by_keyword"].iloc[0]["spend"] / d["by_keyword"]["spend"].sum() * 100
+        if top_kw_share > 60:
+            causes.append(f"**One keyword dominates** — *\"{d['by_keyword'].iloc[0]['keyword']}\"* drives "
+                          f"{top_kw_share:.0f}% of spend. This product's fate is tied to one search pattern; "
+                          "if that keyword's competition heats up, the whole line drops.")
+    if good and not causes:
+        causes.append("**All funnel stages hold up vs peers** — no single stage is doing the heavy lifting; "
+                      "this is a broadly well-performing product.")
+    if not causes:
+        causes.append("Funnel stages are within 25% of peer averages — the deviation is coming from "
+                      "cumulative small differences rather than one clear cause. Sample-size caveat applies.")
+    for c in causes:
+        st.markdown(f"- {c}")
+
+    # === RECOMMENDATION ==================================================
+    st.markdown("**🎬 RECOMMENDATION**")
+    recs = []
+    if good:
+        # Scaling recs for winners
+        if d["by_city"]["gmv"].sum() > 0:
+            underused = d["by_city"][(d["by_city"]["roi"] > blended_roi) &
+                                     (d["by_city"]["spend"] < d["by_city"]["spend"].median())]
+            if not underused.empty:
+                recs.append(f"**Scale winning cities:** {len(underused)} cities have above-blended ROI on this "
+                            "product but below-median spend. Raise bids/budgets there before saturating current hotspots.")
+        if not d["by_match"].empty:
+            exact_row = d["by_match"][d["by_match"]["match_type"] == "KEYWORD_MATCH_TYPE_EXACT"]
+            if not exact_row.empty and (exact_row.iloc[0]["roi"] or 0) > 2:
+                recs.append("**Graduate winning broad queries to exact** — check the Search Query Deep Dive "
+                            "for shopper-typed queries against this product's keywords and add the top-ROI ones as new exact keywords.")
+    else:
+        # Fix recs for laggards
+        if ctr < peer["ctr"] * 0.8 and peer["ctr"] > 0:
+            recs.append("**Fix the creative first** — a new hero image or price-forward copy usually lifts "
+                        "CTR before any bid changes matter.")
+        if a2c_conv < peer["conv_rate"] * 0.8 and t["a2c"] > 0:
+            recs.append("**Investigate cart-drop causes** — check MOV (minimum order value), out-of-stock cities, "
+                        "and whether a rival product sits alongside this one in cart bundles.")
+        # Loser broad keywords under this product?
+        loser_kws = d["by_keyword"][(d["by_keyword"]["spend"] >= 100) &
+                                     ((d["by_keyword"]["roi"].fillna(0)) < 1)]
+        if not loser_kws.empty:
+            total_loser_spend = loser_kws["spend"].sum()
+            recs.append(f"**Pause {len(loser_kws)} loser keywords** on this product "
+                        f"(₹{format_inr(total_loser_spend)} spent at < 1x ROI). See table above.")
+        if not recs:
+            recs.append("**Cut budget by 30% and observe for a week** — the deviation isn't traceable to "
+                        "one clear cause, so a controlled reduction protects spend without killing signal.")
+    for r in recs:
+        st.markdown(f"- {r}")
+
+
 min_date, max_date, all_campaigns, all_cities, total_rows = load_filter_options(DB_VERSION)
 
 if total_rows == 0:
@@ -753,37 +1087,41 @@ by_product["conv_rate"] = by_product["conversions"] / by_product["clicks"].repla
 min_spend = by_product["spend"].median() if not by_product.empty else 0
 qualifying = by_product[by_product["spend"] >= min_spend].dropna(subset=["roi"]).copy()
 
-insight_rows = []
+top_outliers = pd.DataFrame()
 if not qualifying.empty:
     qualifying["deviation"] = qualifying["roi"] - blended_roi
     top_outliers = qualifying.reindex(qualifying["deviation"].abs().sort_values(ascending=False).index).head(10)
-    for _, r in top_outliers.iterrows():
-        good = r["deviation"] >= 0
-        icon, verb = ("🟢", "outperforming") if good else ("🔴", "underperforming")
-        conv_rate = r["conv_rate"] if pd.notna(r["conv_rate"]) else 0
-        insight_rows.append(
-            f'<div style="padding:6px 0;border-bottom:1px solid {accents["blue"]["border"]};font-size:13px">'
-            f'{icon} <b>{r["product_name"]}</b> — {r["roi"]:.2f}x ROI vs {blended_roi:.2f}x average '
-            f'({verb} by {abs(r["deviation"]):.2f}x)<br>'
-            f'<span style="color:{pal["text3"]}">₹{format_inr(r["spend"])} spend → ₹{format_inr(r["gmv"])} GMV, '
-            f'{conv_rate:.0f}% conversion rate</span></div>'
-        )
 
 st.markdown(f'<div class="kpi-grid">{cards_html}</div>', unsafe_allow_html=True)
 
 st.markdown(
     f'<div class="kpi-label" style="margin-bottom:6px;color:{accents["blue"]["fg"]}">AI INSIGHTS — TOP 10 '
-    f'OUTLIER PRODUCTS (BY ROI DEVIATION)</div>', unsafe_allow_html=True,
+    f'OUTLIER PRODUCTS (BY ROI DEVIATION)</div>'
+    f'<div style="font-size:11px;color:{pal["text3"]};margin-bottom:8px">'
+    f'Click any row to open a per-product deep dive (WHAT / WHY / HOW / WHOM / CAUSE / RECOMMENDATION), '
+    f'built live from this product\'s rows in the current filter window.</div>',
+    unsafe_allow_html=True,
 )
-if insight_rows:
-    st.markdown(
-        f'<div style="max-height:280px;overflow-y:auto;background:{accents["blue"]["bg"]};'
-        f'border:1px solid {accents["blue"]["border"]};border-radius:12px;padding:10px 14px;margin-bottom:1.4rem">'
-        + "".join(insight_rows) + "</div>",
-        unsafe_allow_html=True,
-    )
-else:
+if top_outliers.empty:
     st.caption("No product-level data with meaningful spend in the current filter.")
+else:
+    for _, r in top_outliers.iterrows():
+        good = r["deviation"] >= 0
+        icon, verb = ("🟢", "outperforming") if good else ("🔴", "underperforming")
+        conv_rate = r["conv_rate"] if pd.notna(r["conv_rate"]) else 0
+        # Expander label mirrors the old one-liner so the collapsed view
+        # is visually identical to the previous static list.
+        label = (f"{icon}  {r['product_name']}  —  {r['roi']:.2f}x ROI vs {blended_roi:.2f}x avg "
+                 f"({verb} by {abs(r['deviation']):.2f}x)  ·  "
+                 f"₹{format_inr(r['spend'])} spend → ₹{format_inr(r['gmv'])} GMV, "
+                 f"{conv_rate:.0f}% conv rate")
+        with st.expander(label, expanded=False):
+            render_product_deep_dive(
+                product_name=r["product_name"],
+                row=r, blended_roi=blended_roi,
+                start_date=start_date, end_date=end_date,
+                campaigns=tuple(selected_campaigns), cities=tuple(selected_cities),
+            )
 
 if compare_mode and compare is None:
     st.caption("No data in the comparison period for the current filters.")
