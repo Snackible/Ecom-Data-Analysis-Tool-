@@ -16,6 +16,7 @@ import streamlit as st
 
 import config
 import ingest
+import search_query_deep_dive as sqdd
 
 st.set_page_config(page_title="Instamart Ads Dashboard", layout="wide")
 
@@ -438,6 +439,18 @@ if total_rows == 0:
     st.info("Database exists but the granular table is empty - upload a IM_GRANULAR_*.csv file above.")
     st.stop()
 
+# --- View selector -----------------------------------------------------------
+# Top-of-sidebar switch between the main dashboard and the Search Query
+# Deep Dive. Both views read from the same DB and honor the same filter
+# widgets below - a radio (not tabs) so the switch is unmistakable and
+# so a heavy view doesn't re-render just because the user opened a tab.
+view_mode = st.sidebar.radio(
+    "📍 View",
+    ["📊 Main dashboard", "🔍 Search Query deep dive"],
+    label_visibility="visible",
+)
+st.sidebar.markdown("---")
+
 # --- Filters ---------------------------------------------------------------
 st.sidebar.header("Filters")
 
@@ -473,6 +486,23 @@ selected_keywords = st.sidebar.multiselect(
 selected_cities = st.sidebar.multiselect("Cities", all_cities, default=all_cities)
 if not selected_cities:
     st.warning("Select at least one city.")
+    st.stop()
+
+# If the user picked the deep-dive view, render it now and short-circuit
+# the main-dashboard rendering below. Skips the load_aggregates() query
+# (which the deep dive doesn't use) - the deep dive has its own cached
+# loaders that pull straight from the granular/search_query tables.
+if view_mode == "🔍 Search Query deep dive":
+    sqdd.render(
+        db_version=DB_VERSION,
+        start_date=start_date,
+        end_date=end_date,
+        selected_campaigns=selected_campaigns,
+        selected_cities=selected_cities,
+        format_inr=format_inr,
+        format_df_inr=format_df_inr,
+        accents=accents,
+    )
     st.stop()
 
 agg = load_aggregates(DB_VERSION, start_date, end_date, tuple(selected_campaigns),
