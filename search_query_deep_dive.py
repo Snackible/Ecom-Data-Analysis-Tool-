@@ -244,7 +244,7 @@ def render(db_version, start_date, end_date, selected_campaigns, selected_cities
         return
 
     # KPI card row - one card per match type, color-coded
-    color_for = {"Broad": "blue", "Exact": "pink", "Other/None": "yellow"}
+    color_for = {"Broad": "blue", "Exact": "green", "Other/None": "amber"}
     cols = st.columns(len(mt))
     for col, (_, row) in zip(cols, mt.iterrows()):
         label = row["match_type_label"]
@@ -283,7 +283,7 @@ def render(db_version, start_date, end_date, selected_campaigns, selected_cities
             x=alt.X("Share:Q", stack="normalize", axis=alt.Axis(format="%", title=None)),
             color=alt.Color("Match type:N",
                             scale=alt.Scale(domain=["Broad", "Exact"],
-                                            range=[accents["blue"]["fg"], accents["pink"]["fg"]])),
+                                            range=[accents["blue"]["fg"], accents["green"]["fg"]])),
             tooltip=["Match type", "Metric", alt.Tooltip("Share:Q", format=".1f")],
         ).properties(height=110)
         st.altair_chart(chart, use_container_width=True)

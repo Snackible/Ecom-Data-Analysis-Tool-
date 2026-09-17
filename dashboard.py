@@ -144,31 +144,57 @@ if _required_password and not st.session_state.get("authenticated"):
     st.stop()
 
 # --- Theme -------------------------------------------------------------------
+# Cream/beige base + blue accent design (per client UI spec). Every card,
+# button, table and chart pulls from these tokens so the whole app stays
+# on the same palette regardless of section.
 PALETTES = {
-    "dark": dict(bg="#0B0F19", surface="#161B29", text="#F5F7FA", muted="#9AA4B2",
-                 accent="#6C9BFF", positive="#4ADE80", negative="#FF6B6B", border="#232A3B"),
-    "light": dict(bg="#FFFFFF", surface="#FFFFFF", text="#12141C", muted="#666E7D",
-                  accent="#3B6FF6", positive="#16A34A", negative="#E5342E", border="#E7E9F0"),
+    "light": dict(
+        bg="#f5f4f0",       # page background (warm cream)
+        surface="#ffffff",   # cards/sidebar/topbar (pure white)
+        surface2="#f0efe9",  # sunken inputs, hover states
+        border="#e2e0d8",    # 1px card borders + separators
+        text="#1a1916",      # primary text (near-black)
+        text2="#6b6960",     # secondary text
+        text3="#9b9a93",     # muted (labels, sub-copy)
+        accent="#2563eb",    # brand blue - buttons, links, active nav
+        accent2="#1d4ed8",   # accent hover
+        positive="#15803d",  # green text tone
+        positive_bg="#f0fdf4",
+        negative="#b91c1c",  # red text tone
+        negative_bg="#fef2f2",
+        warn="#b45309",      # amber text tone
+        warn_bg="#fffbeb",
+    ),
+    "dark": dict(
+        bg="#111110", surface="#1c1b19", surface2="#252422", border="#2e2d29",
+        text="#f0efe9", text2="#a8a79f", text3="#6b6a62",
+        accent="#3b82f6", accent2="#2563eb",
+        positive="#4ade80", positive_bg="#052e16",
+        negative="#f87171", negative_bg="#450a0a",
+        warn="#fbbf24", warn_bg="#1c1100",
+    ),
 }
-# The four brand hues the dashboard is built around (white base, colored
-# accents) - each carries a foreground (text/border) shade and a soft tint
-# for card backgrounds, tuned separately per theme so tints stay readable in
-# both light and dark mode.
+# Accent colour map used for KPI-card tints and section chips. Blue is
+# the brand; the others are the standard status semantics from the
+# reference UI (green = good, amber = watch, red = bad).
 ACCENTS = {
     "light": {
-        "blue":   dict(fg="#3B6FF6", bg="#EEF3FF", border="#C9D9FF"),
-        "pink":   dict(fg="#DB2777", bg="#FDEFF6", border="#F6C9E0"),
-        "green":  dict(fg="#16A34A", bg="#E9F9EF", border="#BFEBD1"),
-        "yellow": dict(fg="#B7791F", bg="#FFF6E0", border="#F7DFA0"),
+        "blue":   dict(fg="#2563eb", bg="#eff6ff", border="#bfdbfe"),
+        "green":  dict(fg="#15803d", bg="#f0fdf4", border="#bbf7d0"),
+        "amber":  dict(fg="#b45309", bg="#fffbeb", border="#fde68a"),
+        "red":    dict(fg="#b91c1c", bg="#fef2f2", border="#fecaca"),
     },
     "dark": {
-        "blue":   dict(fg="#6C9BFF", bg="#16213D", border="#274073"),
-        "pink":   dict(fg="#F472B6", bg="#3A1E2E", border="#5B2C46"),
-        "green":  dict(fg="#4ADE80", bg="#173626", border="#215239"),
-        "yellow": dict(fg="#FBBF24", bg="#3A2E10", border="#5C4718"),
+        "blue":   dict(fg="#93c5fd", bg="#1e3a5f", border="#1e40af"),
+        "green":  dict(fg="#4ade80", bg="#052e16", border="#166534"),
+        "amber":  dict(fg="#fbbf24", bg="#1c1100", border="#78350f"),
+        "red":    dict(fg="#f87171", bg="#450a0a", border="#991b1b"),
     },
 }
-BOLD_CATEGORICAL = ["#3B6FF6", "#DB2777", "#16A34A", "#D98E00", "#8B5CF6", "#0EA5A6", "#E5342E", "#65A30D"]
+# Categorical chart palette - blue-forward, matches the reference UI's
+# calm-toned chart aesthetic (no neon, no bright pinks).
+BOLD_CATEGORICAL = ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#7c3aed",
+                    "#0891b2", "#65a30d", "#db2777"]
 
 if "dark_mode" not in st.session_state:
     st.session_state.dark_mode = False
@@ -177,35 +203,181 @@ theme_mode = "dark" if st.session_state.dark_mode else "light"
 pal = PALETTES[theme_mode]
 accents = ACCENTS[theme_mode]
 
+# The whole visual system is expressed as CSS variables on :root so every
+# subsequent rule (KPI cards, chart wrappers, tables) reads from the same
+# tokens - matching the CSS-variable convention in the reference UI.
 st.markdown(f"""
 <style>
-.stApp {{ background-color: {pal['bg']}; }}
-.stApp, .stApp p, .stApp span, .stApp label {{ color: {pal['text']}; }}
-[data-testid="stHeader"] {{ background-color: {pal['bg']}; }}
-[data-testid="stHeader"] button, [data-testid="stHeader"] svg {{ color: {pal['text']} !important; }}
-[data-testid="stSidebar"] {{ background-color: {pal['surface']}; border-right: 1px solid {pal['border']}; }}
-[data-testid="stSidebar"] * {{ color: {pal['text']}; }}
+:root {{
+  --bg: {pal['bg']}; --surface: {pal['surface']}; --surface2: {pal['surface2']};
+  --border: {pal['border']}; --text: {pal['text']}; --text2: {pal['text2']}; --text3: {pal['text3']};
+  --accent: {pal['accent']}; --accent2: {pal['accent2']};
+  --green: {pal['positive']}; --green-bg: {pal['positive_bg']};
+  --red: {pal['negative']}; --red-bg: {pal['negative_bg']};
+  --amber: {pal['warn']}; --amber-bg: {pal['warn_bg']};
+  --shadow: 0 1px 3px rgba(0,0,0,{'0.3' if theme_mode == 'dark' else '0.08'});
+  --radius: 10px; --radius-sm: 6px;
+}}
 
-h1 {{ color: {pal['text']} !important; font-weight: 800; margin-bottom: 4px; }}
-h1::after {{ content: ""; display: block; width: 150px; height: 5px; margin-top: 8px; border-radius: 3px;
-             background: linear-gradient(90deg, {accents['blue']['fg']}, {accents['pink']['fg']},
-             {accents['green']['fg']}, {accents['yellow']['fg']}); }}
-h2, h3 {{ color: {pal['text']} !important; font-weight: 700; }}
-h3 {{ border-left: 4px solid {accents['blue']['fg']}; padding-left: 10px; margin-top: 2.4rem !important; }}
+/* Page + typography */
+html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"] {{
+  background: var(--bg) !important;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+}}
+.stApp p, .stApp span, .stApp label, .stApp li, .stApp div {{ color: var(--text); }}
+[data-testid="stMarkdownContainer"] p {{ font-size: 13px; color: var(--text2); }}
 
-.kpi-grid {{ display: grid; grid-template-columns: repeat(2, minmax(150px, 1fr)); gap: 12px;
-             max-width: 560px; margin-bottom: 1.4rem; }}
-.kpi-card {{ border-radius: 12px; padding: 12px 16px; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06); }}
-.kpi-label {{ font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }}
-.kpi-value {{ font-size: 23px; font-weight: 800; color: {pal['text']}; margin-top: 3px; }}
-.kpi-delta-up {{ color: {pal['positive']}; font-size: 12px; font-weight: 700; margin-top: 3px; }}
-.kpi-delta-down {{ color: {pal['negative']}; font-size: 12px; font-weight: 700; margin-top: 3px; }}
+/* Hide Streamlit chrome so the topbar starts flush with the page */
+[data-testid="stHeader"], [data-testid="stToolbar"], #MainMenu, footer {{
+  background: var(--bg) !important; height: 0 !important; visibility: hidden;
+}}
+[data-testid="stAppViewContainer"] > .main > .block-container {{
+  padding: 20px 24px 60px !important; max-width: none;
+}}
 
-.stButton > button {{ background-color: {accents['blue']['fg']}; color: #FFFFFF; border: none;
-                       border-radius: 8px; font-weight: 600; }}
-.stButton > button:hover {{ background-color: {pal['text']}; color: #FFFFFF; }}
-[data-testid="stExpander"] {{ border: 1px solid {pal['border']}; border-radius: 12px; }}
-div[data-testid="stDataFrame"] {{ border: 1px solid {pal['border']}; border-radius: 10px; overflow: hidden; }}
+/* Sidebar - restyled to look like the reference's fixed nav column */
+[data-testid="stSidebar"] {{
+  background: var(--surface) !important;
+  border-right: 1px solid var(--border);
+  padding-top: 0;
+}}
+[data-testid="stSidebar"] > div {{ padding-top: 8px; }}
+[data-testid="stSidebar"] * {{ color: var(--text); font-size: 13px; }}
+[data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {{
+  font-size: 11px !important; font-weight: 700 !important; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--text3) !important; margin: 12px 0 4px !important;
+  border: none !important; padding: 0 !important; background: none !important;
+}}
+[data-testid="stSidebar"] label {{ font-size: 11px !important; color: var(--text3); font-weight: 500; }}
+
+/* Section headings (compact, no gradient, no coloured bars) */
+h1, [data-testid="stMarkdownContainer"] h1 {{
+  font-size: 20px !important; font-weight: 700 !important; color: var(--text) !important;
+  letter-spacing: -0.3px; margin: 0 0 4px !important; padding: 0 !important;
+  border: none !important; background: none !important;
+}}
+h1::after {{ display: none !important; content: none !important; }}
+h2, [data-testid="stMarkdownContainer"] h2 {{
+  font-size: 15px !important; font-weight: 600 !important; color: var(--text) !important;
+  margin: 24px 0 6px !important; padding: 0 !important; border: none !important;
+}}
+h3, [data-testid="stMarkdownContainer"] h3 {{
+  font-size: 13px !important; font-weight: 600 !important; color: var(--text) !important;
+  margin: 20px 0 4px !important; padding: 0 !important; border: none !important;
+}}
+
+/* Widgets - inputs, selects, dates all sit on the sunken surface2 */
+.stTextInput input, .stDateInput input, .stNumberInput input,
+[data-baseweb="select"] > div, [data-baseweb="input"] > div {{
+  background: var(--surface2) !important; border: 1px solid var(--border) !important;
+  border-radius: var(--radius-sm) !important; font-size: 12px !important;
+  color: var(--text) !important; min-height: 32px;
+}}
+[data-baseweb="tag"] {{
+  background: var(--accent) !important; color: #fff !important;
+  border-radius: 4px !important; font-size: 11px !important;
+}}
+[data-baseweb="tag"] span {{ color: #fff !important; }}
+
+/* Buttons - primary is accent blue with hover to darker accent */
+.stButton > button, .stDownloadButton > button {{
+  background: var(--accent) !important; color: #ffffff !important;
+  border: none !important; border-radius: var(--radius-sm) !important;
+  font-weight: 500 !important; font-size: 12px !important; padding: 6px 14px !important;
+  min-height: auto !important;
+}}
+.stButton > button:hover, .stDownloadButton > button:hover {{
+  background: var(--accent2) !important; color: #ffffff !important;
+}}
+.stButton > button p {{ color: #ffffff !important; font-size: 12px !important; }}
+
+/* Radio (view switcher) - buttons that highlight when selected */
+[data-testid="stSidebar"] [role="radiogroup"] > label {{
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  border-radius: var(--radius-sm); cursor: pointer; margin-bottom: 2px;
+  transition: background 0.15s;
+}}
+[data-testid="stSidebar"] [role="radiogroup"] > label:hover {{ background: var(--surface2); }}
+[data-testid="stSidebar"] [role="radiogroup"] > label[data-checked="true"] {{
+  background: var(--accent); color: #fff !important;
+}}
+[data-testid="stSidebar"] [role="radiogroup"] > label[data-checked="true"] * {{ color: #fff !important; }}
+
+/* Toggle (dark mode) styling */
+[data-testid="stSidebar"] [data-baseweb="checkbox"] {{ font-size: 12px; }}
+
+/* KPI cards - the reference UI's summary tiles */
+.kpi-grid {{
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px; margin-bottom: 20px; max-width: none;
+}}
+.kpi-card {{
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow);
+}}
+.kpi-label {{
+  font-size: 11px; color: var(--text3); font-weight: 500;
+  margin-bottom: 6px; text-transform: none; letter-spacing: 0;
+}}
+.kpi-value {{
+  font-size: 22px; font-weight: 700; color: var(--text);
+  letter-spacing: -0.5px; margin-top: 0;
+}}
+.kpi-delta-up {{ color: var(--green); font-size: 11px; font-weight: 500; margin-top: 4px; }}
+.kpi-delta-down {{ color: var(--red); font-size: 11px; font-weight: 500; margin-top: 4px; }}
+.kpi-sub {{ font-size: 11px; color: var(--text3); margin-top: 4px; }}
+
+/* Chart & table cards - the visual container the reference uses everywhere */
+div[data-testid="stVegaLiteChart"], div[data-testid="stAltairChart"], .stVegaLite {{
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow);
+  margin-bottom: 14px;
+}}
+div[data-testid="stDataFrame"], div[data-testid="stTable"] {{
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow);
+  margin-bottom: 20px;
+}}
+
+/* Expander (upload panel) - flat white card */
+[data-testid="stExpander"] {{
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 20px;
+}}
+[data-testid="stExpander"] summary {{ font-size: 13px; font-weight: 600; padding: 12px 16px; }}
+
+/* Alerts - success/warning/error/info styled with the palette tokens */
+[data-testid="stAlert"] {{
+  border-radius: var(--radius); border: 1px solid var(--border);
+  padding: 12px 14px; box-shadow: var(--shadow); font-size: 12px;
+}}
+
+/* Tabs - the reference UI's underline-only tab row */
+[data-baseweb="tab-list"] {{
+  border-bottom: 1px solid var(--border); gap: 0;
+}}
+[data-baseweb="tab"] {{
+  padding: 8px 14px !important; font-size: 12px !important;
+  color: var(--text3) !important; font-weight: 500 !important;
+  border-bottom: 2px solid transparent !important;
+}}
+[data-baseweb="tab"][aria-selected="true"] {{
+  color: var(--accent) !important; border-bottom-color: var(--accent) !important;
+}}
+
+/* Metric widget (st.metric on the deep-dive summary row) */
+[data-testid="stMetric"] {{
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--shadow);
+}}
+[data-testid="stMetricLabel"] p {{ color: var(--text3) !important; font-size: 11px !important; }}
+[data-testid="stMetricValue"] {{ color: var(--text) !important; font-size: 22px !important; font-weight: 700 !important; }}
+
+/* Dividers - a hairline, not the default Streamlit slab */
+hr {{ border: none !important; border-top: 1px solid var(--border) !important; margin: 24px 0 !important; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -540,6 +712,9 @@ def pct_delta(cur, prev):
 
 
 def kpi_card(label: str, value_str: str, color_key: str, cur_val=None, prev_val=None) -> str:
+    """Flat white card with a subtle colored accent dot next to the label -
+    the reference UI's summary tile style. `color_key` still drives the
+    dot color so callers can categorize by section."""
     c = accents[color_key]
     delta_html = ""
     if compare is not None and cur_val is not None and prev_val is not None:
@@ -548,22 +723,23 @@ def kpi_card(label: str, value_str: str, color_key: str, cur_val=None, prev_val=
             cls = "kpi-delta-up" if d >= 0 else "kpi-delta-down"
             arrow = "▲" if d >= 0 else "▼"
             delta_html = f'<div class="{cls}">{arrow} {abs(d):.1f}% vs compare</div>'
-    card_style = f'background:{c["bg"]}; border:1px solid {c["border"]}; border-left:4px solid {c["fg"]};'
-    return (f'<div class="kpi-card" style="{card_style}">'
-            f'<div class="kpi-label" style="color:{c["fg"]}">{label}</div>'
+    dot = (f'<span style="display:inline-block;width:7px;height:7px;border-radius:50%;'
+           f'background:{c["fg"]};margin-right:6px;vertical-align:middle"></span>')
+    return (f'<div class="kpi-card">'
+            f'<div class="kpi-label">{dot}{label}</div>'
             f'<div class="kpi-value">{value_str}</div>{delta_html}</div>')
 
 
 cards_html = "".join([
     kpi_card("ROI", f"{current['roi']:.2f}x", "blue", current["roi"], compare["roi"] if compare else None),
-    kpi_card("GMV", f"₹{format_inr(current['gmv'])}", "pink", current["gmv"], compare["gmv"] if compare else None),
-    kpi_card("Spend", f"₹{format_inr(current['spend'])}", "green", current["spend"],
+    kpi_card("GMV", f"₹{format_inr(current['gmv'])}", "green", current["gmv"], compare["gmv"] if compare else None),
+    kpi_card("Spend", f"₹{format_inr(current['spend'])}", "amber", current["spend"],
               compare["spend"] if compare else None),
-    kpi_card("Impressions", format_inr(current['impressions']), "yellow", current["impressions"],
+    kpi_card("Impressions", format_inr(current['impressions']), "blue", current["impressions"],
               compare["impressions"] if compare else None),
     kpi_card("eCPM", f"₹{format_inr(current['ecpm'], 2)}", "blue", current["ecpm"],
               compare["ecpm"] if compare else None),
-    kpi_card("Clicks", format_inr(current['clicks']), "pink", current["clicks"],
+    kpi_card("Clicks", format_inr(current['clicks']), "green", current["clicks"],
               compare["clicks"] if compare else None),
 ])
 total_impressions, total_clicks = current["impressions"], current["clicks"]
@@ -589,7 +765,7 @@ if not qualifying.empty:
             f'<div style="padding:6px 0;border-bottom:1px solid {accents["blue"]["border"]};font-size:13px">'
             f'{icon} <b>{r["product_name"]}</b> — {r["roi"]:.2f}x ROI vs {blended_roi:.2f}x average '
             f'({verb} by {abs(r["deviation"]):.2f}x)<br>'
-            f'<span style="color:{pal["muted"]}">₹{format_inr(r["spend"])} spend → ₹{format_inr(r["gmv"])} GMV, '
+            f'<span style="color:{pal["text3"]}">₹{format_inr(r["spend"])} spend → ₹{format_inr(r["gmv"])} GMV, '
             f'{conv_rate:.0f}% conversion rate</span></div>'
         )
 
@@ -783,7 +959,7 @@ scatter = alt.Chart(by_campaign).mark_circle(size=140, opacity=0.85).encode(
     tooltip=["campaign_name", "spend", "gmv", "roi"],
 )
 trend = alt.Chart(by_campaign).transform_regression("spend", "gmv").mark_line(
-    color=pal["muted"], strokeDash=[4, 4]
+    color=pal["text3"], strokeDash=[4, 4]
 ).encode(x="spend", y="gmv")
 labels = alt.Chart(outlier_labels).mark_text(dy=-12, fontWeight="bold").encode(
     x="spend", y="gmv", text="campaign_name",
