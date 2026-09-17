@@ -19,6 +19,13 @@ import ingest
 
 st.set_page_config(page_title="Instamart Ads Dashboard", layout="wide")
 
+# Auto-rebuild database from CSVs in data/processed/ if it doesn't exist (e.g. after Render restart)
+if not config.DB_PATH.exists():
+    csv_files = list(config.PROCESSED_DIR.glob("*.csv"))
+    if csv_files:
+        with st.spinner("Rebuilding database from source CSVs..."):
+            ingest.ingest_files(csv_files)
+
 
 def format_inr(value, decimals: int = 0) -> str:
     """Indian digit grouping (lakhs/crores), e.g. 2978378 -> '29,78,378'.
