@@ -32,8 +32,9 @@ streamlit run dashboard.py
 ```
 
 No password prompt locally - `DASHBOARD_PASSWORD` is only enforced when that
-env var is set (i.e. on the Render deployment). Local `db/ads.duckdb`
-already has real data in it since it's committed to the repo.
+env var is set (i.e. on the Render deployment). On first launch the DB
+auto-rebuilds from the gzipped source archives in `data/processed/` (~3s
+for the current data) - the DB file itself is gitignored.
 
 ## Adding next month's data
 
@@ -47,13 +48,15 @@ or `.xlsx`/`.xls` both work - Excel files are converted to the same layout
 under the hood), click **Ingest uploaded files**.
 
 - **On the live Render deployment**: if `GITHUB_TOKEN` is configured (see
-  below), a successful upload also **auto-commits and pushes**
-  `db/ads.duckdb` back to GitHub, so the data survives Render's free-tier
-  filesystem being wiped on the next restart/redeploy. You'll see a
-  confirmation message, and Render will auto-redeploy a couple minutes
-  later with the new data baked in.
-- **Locally**: the upload updates your local `db/ads.duckdb` immediately;
-  commit and push it yourself when ready (see workflow B).
+  below), a successful upload also **auto-commits and pushes** the new
+  gzipped archive(s) in `data/processed/` back to GitHub, so the source
+  data survives Render's free-tier filesystem being wiped on the next
+  restart/redeploy. You'll see a confirmation message, and Render will
+  auto-redeploy a couple minutes later with the new archive baked in - the
+  DB rebuilds from it on startup.
+- **Locally**: the upload updates your local DB immediately and drops a
+  new `.csv.gz` into `data/processed/`; commit and push it yourself when
+  ready (see workflow B).
 
 ### B. Manually (CLI)
 
@@ -72,18 +75,21 @@ under the hood), click **Ingest uploaded files**.
    `data/processed/`. Re-running with the same file, or a corrected
    re-export covering the same date range, replaces that period's rows
    rather than duplicating them - safe to re-run.
-3. To update the live site: `git add db/ads.duckdb && git commit -m "..." && git push`
-   - Render auto-redeploys on push to `main`.
+3. To update the live site: `git add data/processed/ && git commit -m "..." && git push`
+   - Render auto-redeploys on push to `main`, and the DB rebuilds from the
+     new archives on startup.
 
-## Why the data file is committed to git
+## Why source data is committed as gzipped CSVs
 
 Render's free tier has no persistent disk - anything written to the
-filesystem at runtime (including uploads) is wiped on the next
-redeploy/restart. Since `db/ads.duckdb` is small (~18MB, not the raw
-~120MB CSVs), it ships as part of the deploy instead: `.gitignore` does
-**not** exclude it (unlike a typical project's DB file), and every push
-that includes an updated `db/ads.duckdb` becomes the live data on the next
-Render deploy.
+filesystem at runtime (including uploads and the built DB) is wiped on the
+next redeploy/restart. So the source exports themselves ship in the repo,
+gzipped: `.gitignore` excludes uncompressed `*.csv` (and the built
+`db/*.duckdb`) but tracks the archived `*.csv.gz` under `data/processed/`.
+Compression is ~30x on these exports (a month of data is ~5-6MB gzipped,
+vs. ~180MB raw), which stays well under GitHub's 100MB per-file limit for
+many years of monthly uploads. The DB rebuilds from those archives in a
+few seconds on app startup.
 
 ## Enabling auto-commit-from-Render (optional)
 

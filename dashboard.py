@@ -69,15 +69,18 @@ def format_df_inr(df: pd.DataFrame, cols: list) -> pd.DataFrame:
 
 
 def commit_and_push_data() -> str | None:
-    """After a dashboard upload, commit db/ads.duckdb and push to GitHub so
-    the data survives Render's ephemeral filesystem on the next redeploy.
+    """After a dashboard upload, commit the new .csv.gz archives in
+    data/processed/ and push them to GitHub so the source data survives
+    Render's ephemeral filesystem on the next redeploy - the DB itself
+    isn't pushed (it auto-rebuilds from the archives on startup).
 
-    Requires GITHUB_TOKEN (a token scoped to just this repo's Contents:
-    read/write - see README) set as an env var; returns None and does
-    nothing if it isn't set (e.g. local dev, where the manual
-    ingest -> commit -> push workflow in the README covers this instead).
-    Never surfaces the token in any message shown to the UI, even on
-    failure - only a generic string.
+    Requires GITHUB_TOKEN (a fine-grained token scoped to just this repo's
+    Contents: read/write - see README) set as an env var. Also needs
+    GITHUB_REPO ("owner/repo") when running outside a checkout that already
+    has an origin remote. Returns None and does nothing if the token isn't
+    set (e.g. local dev, where the developer's own `git push` workflow
+    covers this). Never surfaces the token in any message shown to the UI,
+    even on failure - only a generic string.
     """
     token = os.environ.get("GITHUB_TOKEN")
     if not token:
@@ -88,20 +91,30 @@ def commit_and_push_data() -> str | None:
     def run(*args: str) -> subprocess.CompletedProcess:
         return subprocess.run(["git", "-C", repo_dir, *args], capture_output=True, text=True)
 
+    # Prefer whatever remote the deploy was cloned from; fall back to an
+    # explicit GITHUB_REPO env var (owner/repo) for environments that don't
+    # clone from GitHub directly.
     remote = run("remote", "get-url", "origin")
-    if remote.returncode != 0 or not remote.stdout.strip().startswith("https://"):
-        return "Auto-push skipped: no https:// git remote configured."
-    authed_remote = remote.stdout.strip().replace("https://", f"https://x-access-token:{token}@", 1)
+    if remote.returncode == 0 and remote.stdout.strip().startswith("https://"):
+        remote_url = remote.stdout.strip()
+    elif os.environ.get("GITHUB_REPO"):
+        remote_url = f"https://github.com/{os.environ['GITHUB_REPO']}.git"
+    else:
+        return "Auto-push skipped: no https:// git remote configured and GITHUB_REPO not set."
+    authed_remote = remote_url.replace("https://", f"https://x-access-token:{token}@", 1)
 
     run("config", "user.email", "dashboard-bot@snackible.com")
     run("config", "user.name", "Instamart Dashboard Bot")
-    run("add", "db/ads.duckdb")
+    run("add", "data/processed/")
 
-    status = run("status", "--porcelain", "db/ads.duckdb")
+    status = run("status", "--porcelain", "data/processed/")
     if not status.stdout.strip():
-        return "No data changes to commit."
+        return "No new archives to commit."
 
-    commit = run("commit", "-m", "Auto-update data from dashboard upload")
+    # Count what's actually being committed so the UI can show it.
+    new_files = [line.split()[-1] for line in status.stdout.strip().splitlines()]
+
+    commit = run("commit", "-m", f"Auto-add {len(new_files)} new archive(s) from dashboard upload")
     if commit.returncode != 0:
         return "Git commit failed - see server logs for details."
 
@@ -110,7 +123,8 @@ def commit_and_push_data() -> str | None:
     if push.returncode != 0:
         return "Git push failed - check GITHUB_TOKEN is valid and has write access to this repo."
 
-    return "Data committed and pushed to GitHub - Render will redeploy shortly with the new data."
+    return (f"Pushed {len(new_files)} new archive(s) to GitHub. Render will redeploy "
+            f"in ~2 min - your data is now permanent.")
 
 # --- Access control ------------------------------------------------------------
 # Only enforced when DASHBOARD_PASSWORD is set (e.g. on a hosted deployment) -
