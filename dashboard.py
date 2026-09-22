@@ -17,8 +17,7 @@ import streamlit as st
 import config
 import ingest
 import search_query_deep_dive as sqdd
-import product_tracker as pt
-import search_query_intelligence as sqi
+import analyst_engine as ae
 
 st.set_page_config(page_title="Instamart Ads Dashboard", layout="wide")
 
@@ -954,7 +953,7 @@ if total_rows == 0:
 # so a heavy view doesn't re-render just because the user opened a tab.
 view_mode = st.sidebar.radio(
     "📍 View",
-    ["📊 Main dashboard", "🔍 Search Query deep dive", "📦 Per-Product Tracker", "🧠 Advanced Intelligence"],
+    ["📊 Main dashboard", "🔍 Search Query deep dive", "🤖 Analyst Engine"],
     label_visibility="visible",
 )
 st.sidebar.markdown("---")
@@ -1013,17 +1012,13 @@ if view_mode == "🔍 Search Query deep dive":
     )
     st.stop()
 
-if view_mode == "📦 Per-Product Tracker":
-    pt.render(start_date, end_date, tuple(selected_campaigns), tuple(selected_cities))
-    st.stop()
-
-if view_mode == "🧠 Advanced Intelligence":
-    sqi.render(
+if view_mode == "🤖 Analyst Engine":
+    ae.render(
         db_version=DB_VERSION,
         start_date=start_date,
         end_date=end_date,
         campaigns=tuple(selected_campaigns),
-        format_df_inr=format_df_inr,
+        cities=tuple(selected_cities),
     )
     st.stop()
 
