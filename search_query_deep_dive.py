@@ -378,6 +378,97 @@ def _product_keyword_matrix(db_version, start_date, end_date, campaigns, cities)
     return df
 
 
+@st.cache_data(show_spinner=False)
+def _products_on_top_queries(db_version, start_date, end_date, campaigns):
+    """Per-product performance on the top 30 search queries by GMV.
+    Shows which products win/lose on specific queries — reveals product-market fit."""
+    con = config.connect_db()
+    df = con.execute(f"""
+        WITH top_queries AS (
+            SELECT search_query,
+                   SUM(total_gmv) AS query_gmv
+            FROM search_query
+            WHERE metrics_date BETWEEN ? AND ?
+              AND campaign_name IN ({','.join(['?'] * len(campaigns))})
+              AND search_query IS NOT NULL
+            GROUP BY search_query
+            ORDER BY query_gmv DESC
+            LIMIT 30
+        )
+        SELECT sq.search_query, sq.product_name,
+               SUM(sq.total_budget_burnt) AS spend,
+               SUM(sq.total_conversions) AS conversions,
+               SUM(sq.total_gmv) AS gmv,
+               SUM(sq.total_gmv) / NULLIF(SUM(sq.total_budget_burnt), 0) AS roi,
+               100.0 * SUM(sq.total_clicks) / NULLIF(SUM(sq.total_impressions), 0) AS ctr
+        FROM search_query sq
+        JOIN top_queries tq ON sq.search_query = tq.search_query
+        WHERE sq.metrics_date BETWEEN ? AND ?
+          AND sq.campaign_name IN ({','.join(['?'] * len(campaigns))})
+        GROUP BY sq.search_query, sq.product_name
+        ORDER BY sq.search_query DESC, gmv DESC
+    """, [start_date, end_date, *campaigns, start_date, end_date, *campaigns]).fetchdf()
+    con.close()
+    return df
+
+
+@st.cache_data(show_spinner=False)
+def _product_search_query_winners(db_version, product_name, start_date, end_date, campaigns):
+    """For a given product: which search queries drive its sales (product-specific view)."""
+    con = config.connect_db()
+    df = con.execute(f"""
+        SELECT search_query, keyword,
+               CASE
+                   WHEN match_type = 'KEYWORD_MATCH_TYPE_BROAD' THEN 'Broad'
+                   WHEN match_type = 'KEYWORD_MATCH_TYPE_EXACT' THEN 'Exact'
+                   ELSE 'Other'
+               END AS match,
+               SUM(total_budget_burnt) AS spend,
+               SUM(total_conversions) AS conversions,
+               SUM(total_gmv) AS gmv,
+               SUM(total_gmv) / NULLIF(SUM(total_budget_burnt), 0) AS roi,
+               100.0 * SUM(total_clicks) / NULLIF(SUM(total_impressions), 0) AS ctr
+        FROM search_query
+        WHERE metrics_date BETWEEN ? AND ?
+          AND campaign_name IN ({','.join(['?'] * len(campaigns))})
+          AND product_name = ?
+          AND total_conversions > 0
+        GROUP BY search_query, keyword, match_type
+        ORDER BY gmv DESC
+        LIMIT 20
+    """, [start_date, end_date, *campaigns, product_name]).fetchdf()
+    con.close()
+    return df
+
+
+@st.cache_data(show_spinner=False)
+def _product_search_query_wasted(db_version, product_name, start_date, end_date, campaigns, min_spend):
+    """For a given product: which search queries are bleeding spend with no conversions."""
+    con = config.connect_db()
+    df = con.execute(f"""
+        SELECT search_query, keyword,
+               CASE
+                   WHEN match_type = 'KEYWORD_MATCH_TYPE_BROAD' THEN 'Broad'
+                   WHEN match_type = 'KEYWORD_MATCH_TYPE_EXACT' THEN 'Exact'
+                   ELSE 'Other'
+               END AS match,
+               SUM(total_budget_burnt) AS spend,
+               SUM(total_clicks) AS clicks,
+               100.0 * SUM(total_clicks) / NULLIF(SUM(total_impressions), 0) AS ctr
+        FROM search_query
+        WHERE metrics_date BETWEEN ? AND ?
+          AND campaign_name IN ({','.join(['?'] * len(campaigns))})
+          AND product_name = ?
+          AND total_conversions = 0
+        GROUP BY search_query, keyword, match_type
+        HAVING SUM(total_budget_burnt) >= {min_spend}
+        ORDER BY spend DESC
+        LIMIT 20
+    """, [start_date, end_date, *campaigns, product_name]).fetchdf()
+    con.close()
+    return df
+
+
 # ---------------------------------------------------------------------------
 # Render
 # ---------------------------------------------------------------------------
@@ -1018,6 +1109,81 @@ _(Median impressions cutoff for this window: **{med_impr:,.0f}** · median ROI: 
                 })
                 st.dataframe(format_df_inr(m, ["Spend", "GMV"]),
                              width='stretch', hide_index=True, height=420)
+
+    st.divider()
+
+    # === Product-level search query analysis ================================
+    st.subheader("🎁 Product-level search query performance")
+    st.caption(
+        "Drill into which products are winning/losing on specific search queries. "
+        "Reveals product-market fit and creative-keyword-product alignment issues."
+    )
+
+    prod_tab1, prod_tab2 = st.tabs(["Products on top queries", "Per-product deep dive"])
+
+    with prod_tab1:
+        st.markdown("**Which products dominate each of the top 30 search queries?**")
+        st.caption(
+            "Shows top 5 products per query. A product with high ROI on a specific query "
+            "is in great position for that buyer intent — reinforce it."
+        )
+        products_by_query = _products_on_top_queries(db_version, start_date, end_date, campaigns)
+        if products_by_query.empty:
+            st.info("No search query + product combination data in these filters.")
+        else:
+            for query in products_by_query["search_query"].unique()[:10]:
+                query_data = products_by_query[products_by_query["search_query"] == query].sort_values("gmv", ascending=False).head(5)
+                with st.expander(f"**{query}** — {query_data['gmv'].sum():,.0f} GMV"):
+                    display = query_data[["product_name", "spend", "conversions", "gmv", "roi", "ctr"]].copy()
+                    display["roi"] = display["roi"].round(2)
+                    display["ctr"] = display["ctr"].round(2)
+                    display = display.rename(columns={
+                        "product_name": "Product", "spend": "Spend", "conversions": "Conv",
+                        "gmv": "GMV", "roi": "ROI", "ctr": "CTR %"
+                    })
+                    st.dataframe(format_df_inr(display, ["Spend", "GMV"]), use_container_width=True, hide_index=True)
+
+    with prod_tab2:
+        st.markdown("**Pick a product to see its search query performance in depth**")
+        all_products = _product_keyword_matrix(db_version, start_date, end_date, campaigns, cities)
+        if all_products.empty:
+            st.info("No product-keyword data in these filters.")
+        else:
+            product_list = sorted(all_products["product_name"].unique())
+            selected_product = st.selectbox("Product:", product_list, key="sqdd_product")
+
+            if selected_product:
+                winners = _product_search_query_winners(db_version, selected_product, start_date, end_date, campaigns)
+                wasted = _product_search_query_wasted(db_version, selected_product, start_date, end_date, campaigns, MEANINGFUL_SPEND)
+
+                win_col, waste_col = st.columns(2)
+
+                with win_col:
+                    st.markdown("**🎯 Winning searches** (converted)")
+                    if not winners.empty:
+                        w = winners[["search_query", "keyword", "match", "conversions", "gmv", "roi"]].copy()
+                        w["roi"] = w["roi"].round(2)
+                        w = w.rename(columns={
+                            "search_query": "Search query", "keyword": "Keyword", "match": "Match",
+                            "conversions": "Conv", "gmv": "GMV", "roi": "ROI"
+                        })
+                        st.dataframe(format_df_inr(w, ["GMV"]), use_container_width=True, hide_index=True, height=300)
+                    else:
+                        st.info("No converting search queries for this product.")
+
+                with waste_col:
+                    st.markdown("**💸 Wasted searches** (spend but no conversions)")
+                    if not wasted.empty:
+                        st.warning(f"{len(wasted)} queries spent ₹{format_inr(wasted['spend'].sum())} with zero conversions")
+                        wa = wasted[["search_query", "keyword", "match", "spend", "clicks", "ctr"]].copy()
+                        wa["ctr"] = wa["ctr"].round(2)
+                        wa = wa.rename(columns={
+                            "search_query": "Search query", "keyword": "Keyword", "match": "Match",
+                            "spend": "Spend", "clicks": "Clicks", "ctr": "CTR %"
+                        })
+                        st.dataframe(format_df_inr(wa, ["Spend"]), use_container_width=True, hide_index=True, height=300)
+                    else:
+                        st.success("✅ No zero-conversion search queries for this product at this spend threshold.")
 
     st.divider()
 
