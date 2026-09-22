@@ -283,7 +283,7 @@ def render(start_date, end_date, campaigns, cities):
         "match types, cities, and search queries."
     )
 
-    db_version = config.get_db_version()
+    db_version = config.DB_PATH.stat().st_mtime
     blended = _blended_metrics(db_version, start_date, end_date, campaigns, cities)
     products = _product_overview(db_version, start_date, end_date, campaigns, cities)
 
