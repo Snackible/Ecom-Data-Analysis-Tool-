@@ -5,3 +5,21 @@ backgroundColor = "#f5f4f0"
 secondaryBackgroundColor = "#ffffff"
 textColor = "#1a1916"
 font = "sans serif"
+
+[server]
+# Running behind Render's reverse proxy. The defaults below cause the
+# browser's /_stcore/stream websocket to fail and reconnect in a rapid
+# loop, which Render throttles with HTTP 429. These settings stabilize
+# the connection so the reconnect storm (and the 429s) stop.
+headless = true
+enableCORS = false
+enableXsrfProtection = false
+enableWebsocketCompression = false
+# No source-file watching needed on a deployed server; cuts overhead and
+# avoids spurious reruns that add to the request volume.
+fileWatcherType = "none"
+runOnSave = false
+
+[browser]
+# Don't phone home to Streamlit's telemetry endpoint on every session.
+gatherUsageStats = false
