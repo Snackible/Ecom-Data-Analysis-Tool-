@@ -19,6 +19,7 @@ import ingest
 import search_query_deep_dive as sqdd
 import analyst_engine as ae
 import typo_detector as td
+import correlation_analysis as ca
 
 st.set_page_config(page_title="Instamart Ads Dashboard", layout="wide")
 
@@ -954,7 +955,7 @@ if total_rows == 0:
 # so a heavy view doesn't re-render just because the user opened a tab.
 view_mode = st.sidebar.radio(
     "📍 View",
-    ["📊 Main dashboard", "🔍 Search Query deep dive", "🤖 Analyst Engine", "🔍 Typo Detector"],
+    ["📊 Main dashboard", "🔍 Search Query deep dive", "🤖 Analyst Engine", "🔍 Typo Detector", "📈 Correlations"],
     label_visibility="visible",
 )
 st.sidebar.markdown("---")
@@ -1025,6 +1026,16 @@ if view_mode == "🤖 Analyst Engine":
 
 if view_mode == "🔍 Typo Detector":
     td.render(
+        db_version=DB_VERSION,
+        start_date=start_date,
+        end_date=end_date,
+        campaigns=tuple(selected_campaigns),
+        cities=tuple(selected_cities),
+    )
+    st.stop()
+
+if view_mode == "📈 Correlations":
+    ca.render(
         db_version=DB_VERSION,
         start_date=start_date,
         end_date=end_date,
