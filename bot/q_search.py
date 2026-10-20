@@ -209,10 +209,7 @@ def _drag(ctx, p, n):
                          kw_roas=kroas, kw_roas_without=wo,
                          contains_keyword=contains_keyword(r.query, r.keyword), lost=lost))
     d = pd.DataFrame(rows)
-    d = _apply_min_data(ctx, d.assign(days=1, **{})) if False else d
     sub = d[(num(d, "roas").fillna(0) < num(d, "kw_roas").fillna(0)) & (num(d, "kw_roas_without") > num(d, "kw_roas"))]
-    if p.ent("keywords"):
-        pass
     sub = top(sub, n, "lost")
     if sub.empty:
         return _finish(Result(headline="No query is dragging a keyword's ROAS down in this range."), rng)
@@ -243,7 +240,6 @@ def new_queries(ctx, p):
         cur = type(cur)(max(lo, hi - timedelta(days=6)), hi, "latest 7 days")
     prev = previous_period(cur)
     df, rng = ctx.fetch("search_query", ("query",), cur, filters_from(p, "search_query"))
-    old = ctx.fetch("search_query", ("query",), None, None, extra="metrics_date < ?", order="spend DESC")[0] if False else None
     seen = ctx.sql("SELECT DISTINCT lower(trim(search_query)) q FROM search_query WHERE metrics_date < ?", [cur.start])
     seen = set(seen["q"])
     new = df[~df["query"].isin(seen)]
@@ -306,8 +302,6 @@ def more_keywords(ctx, p, exact_only=False):
     df = _apply_min_data(ctx, df)
     sub = df[(num(df, "roas") >= thresh) & (~df["query"].isin(exact))]
     sub = top(sub, p.top_n, "gmv")
-    if p.ent("campaigns"):
-        pass
     res = Result(headline=f"{len(sub)} proven queries convert at ROAS {fmt.roas(thresh)} or better and are not bid as exact keywords."
                  if not sub.empty else "No converting query is missing an exact keyword.")
     if not sub.empty:
@@ -349,14 +343,11 @@ def bucket_split(ctx, p, mode="split"):
     if not (ctx.has_rows("granular") or ctx.has_rows("search_query")):
         return empty_result()
     period = ctx.effective_period(p)
-    if mode in ("scorecard", "split") and p.period is None and ctx.has_rows("granular"):
-        pass
     bid, srv, g, s, rng = _bucket_tables(ctx, p, period)
     cols = ["bucket", "spend", "share", "impressions", "clicks", "ctr", "cpc", "cpm", "gmv", "roas"]
     res = Result()
     notes = []
     if mode == "defend_on_brand":
-        d = s.copy() if False else None
         sq, _ = ctx.fetch("search_query", ("keyword", "query"), period, filters_from(p, "search_query"))
         sq = sq[sq["keyword"].map(lambda k: ctx.clf.bucket(k) == "defend")]
         if sq.empty:
@@ -417,7 +408,7 @@ def bucket_split(ctx, p, mode="split"):
             if not t2.empty:
                 m = cur.merge(t2[["bucket", "spend", "gmv", "roas"]], on="bucket", suffixes=("", "_prev"))
                 m["spend_change"] = [metrics.growth(a, b) for a, b in zip(m["spend"], m["spend_prev"])]
-                m["roas_change"] = [metrics.growth(num(m, "roas")[i] if True else None, num(m, "roas_prev")[i]) for i in range(len(m))]
+                m["roas_change"] = [metrics.growth(num(m, "roas")[i], num(m, "roas_prev")[i]) for i in range(len(m))]
                 res.tables.append((f"Trend vs previous period ({prev.start} to {prev.end})", m[["bucket", "spend", "spend_change", "roas", "roas_change"]]))
             res.notes.append("Defend: judge on ad rank and ROAS; exact-match brand and Guaranteed Top Slot are protected, never cut on ROAS alone.")
             res.notes.append("Attack: judge on competitor closeness and conversion. Expand: judge on ROAS vs break-even and volume.")
@@ -429,7 +420,7 @@ def bucket_split(ctx, p, mode="split"):
             f"{r.bucket} {fmt.inr(r.target * tgt_total)}" for r in srv_t.itertuples()))
     res.notes += notes + _be_note(ctx)[:1]
     if not srv.empty and not bid.empty:
-        diff = max(abs((a or 0) - (b or 0)) for a, b in zip(bid_t["share"], srv_t.set_index("bucket").reindex(bid_t["bucket"])["share"]) if a is not None and b == b) if True else 0
+        diff = max([abs((a or 0) - (b or 0)) for a, b in zip(bid_t["share"], srv_t.set_index("bucket").reindex(bid_t["bucket"])["share"]) if a is not None and b == b] or [0])
         if diff > 0.05:
             res.notes.append("Bid and served splits differ meaningfully; the served split is the truth.")
     return _finish(res, rng)

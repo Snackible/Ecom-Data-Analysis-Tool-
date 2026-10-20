@@ -8,13 +8,14 @@ questions are added without touching code.
 No network, no LLM: purely local string similarity.
 """
 import csv
+import math
 import re
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 from rapidfuzz import fuzz, process
-from sklearn.feature_extraction.text import TfidfVectorizer
 
 from .normalise import norm_text
 
@@ -71,21 +72,61 @@ def load_bank(questions_path=None, para_path=None):
     return docs, routes, texts
 
 
+class TfidfLite:
+    """Small TF-IDF (sublinear tf, l2-normalised, cosine) in plain Python.
+
+    The question bank is a few hundred short phrases, so this is instant, and
+    it avoids importing scikit-learn/scipy (about 75MB of RAM) on a 512MB host.
+    """
+
+    def __init__(self, analyzer="word", ngram_range=(1, 2)):
+        self.analyzer, self.lo, self.hi = analyzer, ngram_range[0], ngram_range[1]
+        self.idf = {}
+
+    def _terms(self, text):
+        if self.analyzer == "word":
+            w = text.split()
+            return [" ".join(w[i:i + n]) for n in range(self.lo, self.hi + 1) for i in range(len(w) - n + 1)]
+        out = []
+        for word in text.split():
+            word = f" {word} "
+            for n in range(self.lo, self.hi + 1):
+                out += [word[i:i + n] for i in range(len(word) - n + 1)]
+        return out
+
+    def _vec(self, text, use_idf=True):
+        c = Counter(self._terms(text))
+        v = {t: (1 + math.log(f)) * (self.idf.get(t, 0.0) if use_idf else 1.0) for t, f in c.items()}
+        norm = math.sqrt(sum(x * x for x in v.values())) or 1.0
+        return {t: x / norm for t, x in v.items() if x}
+
+    def fit(self, docs):
+        df = Counter()
+        for d in docs:
+            df.update(set(self._terms(d)))
+        n = len(docs)
+        self.idf = {t: math.log((1 + n) / (1 + f)) + 1 for t, f in df.items()}
+        self.matrix = [self._vec(d) for d in docs]
+        return self
+
+    def sims(self, text):
+        q = self._vec(text)
+        return [sum(w * d.get(t, 0.0) for t, w in q.items()) for d in self.matrix]
+
+
 class Matcher:
     def __init__(self, questions_path=None, para_path=None):
         self.docs, self.routes, self.texts = load_bank(questions_path, para_path)
         self.norm = [norm_text(t) for _, t in self.docs]
-        self.word = TfidfVectorizer(ngram_range=(1, 2), sublinear_tf=True).fit(self.norm)
-        self.char = TfidfVectorizer(analyzer="char_wb", ngram_range=(3, 5), sublinear_tf=True).fit(self.norm)
-        self.mw = self.word.transform(self.norm)
-        self.mc = self.char.transform(self.norm)
+        self.word = TfidfLite("word", (1, 2)).fit(self.norm)
+        self.char = TfidfLite("char_wb", (3, 5)).fit(self.norm)
 
     def match(self, text: str) -> Match:
         t = norm_text(text)
         if not t:
             return Match(None, 0.0, route="none")
-        sw = (self.word.transform([t]) @ self.mw.T).toarray()[0]
-        sc = (self.char.transform([t]) @ self.mc.T).toarray()[0]
+        sw = self.word.sims(t)
+        sc = self.char.sims(t)
         fz = [fuzz.WRatio(t, d) / 100 for d in self.norm]
         scores = [0.6 * (0.4 * a + 0.6 * b) + 0.4 * c for a, b, c in zip(sw, sc, fz)]
         # best score per question number

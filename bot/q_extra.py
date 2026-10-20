@@ -52,6 +52,9 @@ def competitor_view(ctx: Context, p: Params, mode: str) -> Result:
         sub = g[g["competitor"].str.lower().isin(want)] if want else g
         res.headline = "; ".join(f"{r.competitor}: {fmt.inr(r.spend)}, conversion {fmt.pct(r.conv_rate)}, ROAS {fmt.roas(r.roas)}" for r in sub.itertuples()) or "None of those competitors has spend."
         res.tables.append(("Attack keywords", sub[cols]))
+        missing = [w for w in want if w not in set(sub["competitor"].str.lower())]
+        if missing:
+            notes.append("No attack spend in this range for: " + ", ".join(missing))
     elif mode == "closest":
         t = top(g[num(g, "clicks") > 0], p.top_n, "conv_rate")
         res.headline = f"Best conversion among attack keywords: {t.iloc[0]['competitor']} at {fmt.pct(t.iloc[0]['conv_rate'])}; these are the closest by behaviour." if not t.empty else "No data."

@@ -12,6 +12,7 @@ DOMAIN_WORDS = re.compile(
     r"campaigns?|keywords?|quer(y|ies)|searches|city|cities|sku|skus|product|products|placements?|match|broad|exact|"
     r"rows?|trend|compare|versus|weekly|daily|monthly|loaded|share|top|bottom|lowest|highest|ads?|instamart|"
     r"attack|defend|expand|negative|bid|bids|rank)\b", re.I)
+CROSSCHECK = re.compile(r"\b(tables?|reports?|totals?|files?)\b.*\b(agree|match|reconcile|tally)\b|\bcross.?check\b|\breconcile\b", re.I)
 AMOUNT = re.compile(r"(?:₹|rs\.?\s*|inr\s*)?(\d[\d,]*(?:\.\d+)?)\s*(k|thousand|l|lakh|lakhs|lac|cr|crore)?\b", re.I)
 CHECK_SKIP = {90, 91, 92, 93, 94, 97}
 
@@ -85,6 +86,9 @@ def ask(text: str, settings: dict | None = None, log: bool = True, log_path=None
             if BRAINSTORM.search(text):
                 qn, handled = 111, "bank"
                 res = queries.run_question(ctx, p, 111)
+            elif CROSSCHECK.search(text):
+                handled = "crosscheck"
+                res = q_cost.crosscheck_intent(ctx, p)
             elif m.route == "bank" and m.qn is not None:
                 qn, handled = m.qn, "bank"
                 res = queries.run_question(ctx, p, m.qn)

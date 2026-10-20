@@ -3,5 +3,4 @@ pandas
 streamlit
 openpyxl
 rapidfuzz
-scikit-learn
 pyyaml

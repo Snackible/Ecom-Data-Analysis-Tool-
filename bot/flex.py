@@ -246,7 +246,6 @@ def run(ctx: Context, p: Params, text: str) -> Result:
         col = metric
         m[f"{col}_change"] = [metrics.growth(x, y) for x, y in zip(num(m, col), num(m, f"{col}_prev"))]
         if s.only_down or re.search(r"fell but|dropped but", t):
-            m = m[(num(m, "roas_change") if "roas_change" in m else pd.Series(dtype=float)).notna()] if False else m
             m["roas_change"] = [metrics.growth(x, y) for x, y in zip(num(m, "roas"), num(m, "roas_prev"))]
             m["spend_change"] = [metrics.growth(x, y) for x, y in zip(num(m, "spend"), num(m, "spend_prev"))]
             m = m[(num(m, "roas_change") < 0) & (num(m, "spend_change") > 0)]

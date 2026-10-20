@@ -449,6 +449,4 @@ def judgement(ctx: Context, p: Params, qn: int) -> Result:
             notes.append("needs setting: contribution_before_ads_pct_of_mrp_gmv (the break-even floor for 'not below break-even')")
         if ctx.set("monthly_gmv_target_inr") is None:
             notes.append("needs setting: monthly_gmv_target_inr")
-    elif qn in (112,):
-        pass
     return _fin(res, (cur.start, cur.end))

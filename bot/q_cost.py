@@ -406,7 +406,7 @@ def campaign_budget(ctx: Context, p: Params, mode="increase") -> Result:
 
 
 # ----------------------------------------------------------------- cross-check
-def table_crosscheck(ctx: Context):
+def table_crosscheck(ctx: Context, include_info: bool = False):
     """None when fine or not comparable; else a warning string. Compares the
     search placements across granular and search_query, and summary where its
     period overlaps the granular dates."""
@@ -428,7 +428,8 @@ def table_crosscheck(ctx: Context):
         lo, hi = ctx.bounds("granular")
         s = ctx.sql("SELECT MIN(period_start) a, MAX(period_end) b FROM summary").iloc[0]
         if s["a"] is not None and not pd.isna(s["a"]) and (s["b"].date() < lo or s["a"].date() > hi):
-            msgs.append(f"summary covers {s['a'].date()} to {s['b'].date()}, which does not overlap granular ({lo} to {hi}), so it cannot be compared")
+            if include_info:
+                msgs.append(f"summary covers {s['a'].date()} to {s['b'].date()}, which does not overlap granular ({lo} to {hi}), so it cannot be compared")
         else:
             sm = ctx.sql("SELECT SUM(total_budget_burnt) s FROM summary").iloc[0]["s"]
             gr = ctx.sql("SELECT SUM(total_budget_burnt) s FROM granular").iloc[0]["s"]
@@ -440,9 +441,10 @@ def table_crosscheck(ctx: Context):
 def crosscheck_intent(ctx: Context, p: Params) -> Result:
     if not ctx.has_rows("granular") and not ctx.has_rows("search_query"):
         return empty_result()
-    msgs = table_crosscheck(ctx)
-    r = Result(headline=("Warning: the tables do not agree." if msgs else "The tables agree for search placements."))
-    r.notes += [f"Warning: {m}" for m in msgs]
+    msgs = table_crosscheck(ctx, include_info=True)
+    bad = [m for m in msgs if "cannot be compared" not in m]
+    r = Result(headline=("Warning: the tables do not agree." if bad else "The tables agree for search placements."))
+    r.notes += [(f"Warning: {m}" if m in bad else f"Fact: {m}") for m in msgs]
     return r
 
 

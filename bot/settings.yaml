@@ -10,7 +10,7 @@ monthly_gmv_target_inr: null
 target_a2s_pct: null
 # A2S ceiling as a percent. Needed by Q18, Q99.
 a2s_ceiling_pct: null
-# Which sales figure A2S divides by, as a short note (e.g. "total GMV at MRP"). Needed by Q18.
+# Sales figure A2S divides by: the word total_gmv (use the report GMV) or a rupee number for the period. Needed by Q18.
 a2s_sales_basis: null
 # Contribution before ads as a fraction of MRP GMV (0.30 means 30%). Break-even ROAS = 1 / this.
 # Needed by any question that says "below break-even": Q1, Q4, Q7, Q27, Q58, Q60, Q95 to Q100.

@@ -310,3 +310,16 @@ def test_classification_by_bid_and_served_differ(one_month):
     finally:
         ctx.close()
     assert len(r.tables) == 2  # by bid and by search query served
+
+
+def test_crosscheck_question_routes_and_non_overlap_is_not_a_warning(one_month):
+    con = duckdb.connect(str(one_month))
+    con.execute("INSERT INTO summary (campaign_id, campaign_name, total_budget_burnt, period_start, period_end) "
+                "VALUES ('x','x',100.0,'2026-09-01','2026-09-30')")
+    con.close()
+    r = engine.ask("do the three tables agree on search placement totals?", log=False)
+    assert r.headline == "The tables agree for search placements."
+    assert any("cannot be compared" in n for n in r.notes)
+    # and ordinary answers carry no warning for a non-overlapping summary
+    r2 = engine.ask("which city spends most", log=False)
+    assert not any(n.startswith("Warning:") for n in r2.notes)
