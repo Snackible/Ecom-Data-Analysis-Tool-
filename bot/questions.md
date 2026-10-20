@@ -166,3 +166,20 @@ _Good answer: separates proof from guesswork, admits uncertainty, pushes back wh
 109. Write a 5-line update for my founder on this week's Instamart ads. Judgement question: reply with supporting numbers and the note "Judgement answer needs a human review. Supporting data below." Q109 may be drafted as a 5-line template, marked draft for review.
 110. What principle should I take away from this week's data? Judgement question: reply with supporting numbers and the note "Judgement answer needs a human review. Supporting data below."
 111. Let's brainstorm: how do I grow Instamart ads revenue 30% next month without dropping ROAS below break-even? Judgement question: reply with supporting numbers and the note "Judgement answer needs a human review. Supporting data below."
+
+## Beyond the 111 (flexible questions, examples used for matcher tests)
+
+These are not numbered questions. They show the kinds of free-form asks handled by `bot/flex.py` (lookups, top N, trends, period compares, shares, counts, outliers). See `bot/capabilities.md`.
+
+- Show rows for campaign X in city Y on date Z.
+- Top 15 search queries by clicks last week.
+- Daily spend and ROAS for the last 14 days.
+- Is CPM rising in Keyword Based Ads?
+- Compare this week with last week by placement.
+- Compare August with July by city.
+- What share of GMV came from Collection Ads?
+- How many cities did the Troovy campaign run in?
+- Which months are loaded?
+- Any day with unusual spend?
+- Cities where ROAS fell but spend rose.
+- Do the three tables agree on search placement totals?
