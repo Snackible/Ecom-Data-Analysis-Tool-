@@ -955,7 +955,7 @@ if total_rows == 0:
 # so a heavy view doesn't re-render just because the user opened a tab.
 view_mode = st.sidebar.radio(
     "📍 View",
-    ["📊 Main dashboard", "🔍 Search Query deep dive", "🤖 Analyst Engine", "🔍 Typo Detector", "📈 Correlations"],
+    ["📊 Main dashboard", "🔍 Search Query deep dive", "🤖 Analyst Engine", "🔍 Typo Detector", "📈 Correlations", "💬 Ads Bot"],
     label_visibility="visible",
 )
 st.sidebar.markdown("---")
@@ -1042,6 +1042,11 @@ if view_mode == "📈 Correlations":
         campaigns=tuple(selected_campaigns),
         cities=tuple(selected_cities),
     )
+    st.stop()
+
+if view_mode == "💬 Ads Bot":
+    from bot import chat_tab
+    chat_tab.render()
     st.stop()
 
 agg = load_aggregates(DB_VERSION, start_date, end_date, tuple(selected_campaigns),

@@ -74,19 +74,30 @@ def build_fixture(path, months=("2026-07",), noida=False, empty=False, collectio
                         total_direct_gmv_14d=m["total_gmv"] * (0.8 if d.day > 24 else 0.95),
                         ad_rank=2.0 + (seed % 3), **m,
                     ))
-                if prop in SEARCH_PLACEMENTS and kw:
-                    for q in QUERIES[kw]:
-                        seed += 1
-                        m = _row_metrics(seed)
-                        s_rows.append(dict(
-                            metrics_date=d, campaign_id=camp.lower(), campaign_name=camp,
-                            campaign_status="ACTIVE", bidding_type="BIDDING_STRATEGY_TYPE_CPM",
-                            budget_type="DAILY", ad_property=prop, keyword=kw, match_type=mt,
-                            search_query=q, product_name=prod, city_count=4, total_budget=1000.0,
-                            total_direct_gmv_7d=m["total_gmv"] * 0.8,
-                            total_direct_gmv_14d=m["total_gmv"] * (0.8 if d.day > 24 else 0.95),
-                            ad_rank=2.0, **m,
-                        ))
+    # search_query rows are splits of the granular totals per (date, campaign,
+    # placement, keyword, match type, product), so both tables agree.
+    gdf = pd.DataFrame(g_rows)
+    sdf = gdf[gdf["ad_property"].isin(SEARCH_PLACEMENTS) & gdf["keyword"].notna()]
+    keys = ["metrics_date", "campaign_id", "campaign_name", "campaign_status", "bidding_type", "budget_type",
+            "ad_property", "keyword", "match_type", "product_name"]
+    sums = ["total_impressions", "total_budget_burnt", "total_clicks", "total_a2c", "total_gmv", "total_conversions",
+            "total_direct_gmv_7d", "total_direct_gmv_14d"]
+    agg = sdf.groupby(keys, dropna=False)[sums].sum().reset_index()
+    for r in agg.to_dict("records"):
+        qs = QUERIES[r["keyword"]]
+        n = len(qs)
+        w_spend = [i + 1 for i in range(n)]
+        w_gmv = [n - i for i in range(n)]
+        for i, q in enumerate(qs):
+            row = dict(r)
+            row["search_query"] = q
+            row["city_count"] = 4
+            row["ad_rank"] = 2.0
+            for c in ("total_impressions", "total_budget_burnt", "total_clicks", "total_a2c", "total_conversions"):
+                row[c] = r[c] * w_spend[i] / sum(w_spend)
+            for c in ("total_gmv", "total_direct_gmv_7d", "total_direct_gmv_14d"):
+                row[c] = r[c] * w_gmv[i] / sum(w_gmv)
+            s_rows.append(row)
     for table, rows in (("granular", g_rows), ("search_query", s_rows)):
         if not rows:
             continue

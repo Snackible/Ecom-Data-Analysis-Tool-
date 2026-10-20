@@ -388,8 +388,8 @@ def bucket_split(ctx, p, mode="split"):
             return empty_result()
         d["bucket"] = d["keyword"].map(ctx.clf.bucket)
         out = sum_by(d, ["bucket", "match_type"])
-        res.headline = "ROAS by bucket and match type is below; the best cell is " + \
-            (lambda t: f"{t.iloc[0]['bucket']} {t.iloc[0]['match_type']} at {fmt.roas(t.iloc[0]['roas'])}")(top(out[num(out, 'spend') > 0], 1, "roas"))
+        best = top(out[num(out, 'spend') > 0], 1, "roas").iloc[0]
+        res.headline = f"Best bucket x match type cell: {best['bucket']} {best['match_type']} at ROAS {fmt.roas(best['roas'])}."
         res.tables.append(("Bucket x match type (by keyword bid)", out[["bucket", "match_type", "spend", "clicks", "gmv", "roas"]]))
         res.notes.append("Fact: attack ROAS is lower by nature; judge it on competitor closeness and conversion.")
         return _finish(res, rng)
