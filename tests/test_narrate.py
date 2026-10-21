@@ -84,3 +84,18 @@ def test_named_city_gets_its_own_headline(two_months):
     r = engine.ask("how much budget is Pune consuming", log=False)
     assert r.headline.startswith("Pune is number")
     assert "of 4 cities by spend" in r.headline
+
+
+def test_manager_read_flags_leak_and_winners():
+    df = pd.DataFrame({"query": list("abcdef"), "spend": [900.0, 800.0, 100.0, 90.0, 80.0, 70.0],
+                       "gmv": [300.0, 400.0, 600.0, 500.0, 400.0, 350.0], "roas": [0.33, 0.5, 6.0, 5.56, 5.0, 5.0]})
+    out = "\n".join(narrate.manager_read(Result(tables=[("t", df)])))
+    assert "2 of 6 rows" in out and "Action: start the clean-up with **a**" in out
+    assert "candidates for more budget" in out and "stock and fill rate" in out
+
+
+def test_manager_read_names_the_driver_and_halves():
+    cmp_ = pd.DataFrame({"metric": ["roas", "cpm", "ctr"], "current": [2.0, 150.0, .02], "previous": [2.5, 100.0, .021], "change": [-0.2, 0.5, -0.05]})
+    assert "biggest mover" in "\n".join(narrate.manager_read(Result(tables=[("t", cmp_)]))) and "CPM" in "\n".join(narrate.manager_read(Result(tables=[("t", cmp_)])))
+    ts = pd.DataFrame({"date": pd.date_range("2026-07-01", periods=8), "spend": [100.0] * 4 + [200.0] * 4, "gmv": [300.0] * 4 + [400.0] * 4})
+    assert "diminishing returns" in "\n".join(narrate.manager_read(Result(tables=[("t", ts)])))

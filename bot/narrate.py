@@ -169,6 +169,121 @@ def describe_table(title: str, df: pd.DataFrame, full: bool = True) -> str:
     return " ".join(out)
 
 
+# ------------------------------------------------------------ manager's read
+def _names(df, lab, idx, k=3):
+    return ", ".join(f"**{_label(df.loc[i], lab)}**" for i in list(idx)[:k])
+
+
+def _rows_read(df) -> list:
+    """What a category manager would say about a ranked table: where money is
+    leaking, where it earns, and what to check before moving budget."""
+    cols = set(df.columns)
+    lab = _label_cols(df)
+    if not lab or not {"spend", "roas"} <= cols or len(df) < 3:
+        return []
+    sp, r = _num(df, "spend"), _num(df, "roas")
+    ok = sp.notna() & r.notna()
+    tot = sp[ok].sum()
+    if tot <= 0:
+        return []
+    out = []
+    low = ok & (r < 1)
+    if low.any() and not low.all():
+        ls = sp[low].sum()
+        line = f"{int(low.sum())} of {int(ok.sum())} rows ({fmt.pct(ls / tot)} of the spend shown, {fmt.inr(ls)}) return less than they cost at MRP"
+        if "gmv" in cols:
+            g = _num(df, "gmv")[low].sum()
+            line += f", bringing back only {fmt.inr(g)} of GMV"
+        out.append(f"Fact: {line}.")
+        worst = sp[low].sort_values(ascending=False).index
+        out.append(f"Action: start the clean-up with {_names(df, lab, worst)}, where the leak is biggest.")
+    elif low.all():
+        out.append("Fact: every row shown is below 1.00, so this is a systematic leak and not a few bad rows. Tighten the match type or cut the bids on the keywords serving these first.")
+    blended = metrics.roas(_num(df, "gmv")[ok].sum(), tot) if "gmv" in cols else None
+    if blended:
+        strong = ok & (r >= max(1.0, blended * 1.25)) & (sp <= sp[ok].median())
+        if strong.any():
+            idx = r[strong].sort_values(ascending=False).index
+            out.append(f"Hypothesis: {_names(df, lab, idx)} {'earns' if len(idx) == 1 else 'earn'} well above the {fmt.roas(blended)} blended ROAS on below-median spend, "
+                       "so they are the first candidates for more budget. Confirm stock and fill rate before scaling, because ROAS here ignores availability.")
+    z = ok & (_num(df, "gmv").fillna(0) == 0) if "gmv" in cols else None
+    if z is not None and z.any():
+        out.append(f"Fact: {fmt.inr(sp[z].sum())} went to {int(z.sum())} rows with no GMV at all.")
+    return out
+
+
+def _compare_read(df) -> list:
+    rows = {r["metric"]: r for _, r in df.iterrows()}
+
+    def ch(m):
+        r = rows.get(m)
+        return None if r is None else r["change"]
+    roas_ch = ch("roas")
+    if roas_ch is None or abs(roas_ch) < 0.03:
+        return []
+    drivers = []
+    for m, bad_when, name in (("cpm", 1, "CPM"), ("ctr", -1, "CTR"), ("conv_rate", -1, "conversion rate"), ("conversions", -1, "orders")):
+        c = ch(m)
+        if c is not None and abs(c) >= 0.03:
+            drivers.append((abs(c), m, name, c, bad_when))
+    if not drivers:
+        return []
+    drivers.sort(reverse=True)
+    falling = roas_ch < 0
+    top = drivers[0]
+    d = "up" if top[3] > 0 else "down"
+    line = (f"Hypothesis: the biggest mover behind the ROAS {'drop' if falling else 'rise'} is {top[2]}, {d} {abs(top[3]) * 100:.1f}%"
+            + (" (a cost-side effect, so check bids and placement mix)" if top[1] == "cpm"
+               else " (a relevance effect, so check keyword and creative fit)" if top[1] == "ctr"
+               else " (a landing and availability effect, so check stock and price on the listings)" if top[1] == "conv_rate"
+               else "") + ".")
+    out = [line]
+    if falling:
+        out.append("Fact: the most recent days can look worse partly because attribution is still coming in, so compare like-for-like lag before reacting.")
+    return out
+
+
+def _series_read(df, tcol) -> list:
+    if not {"spend", "gmv"} <= set(df.columns) or len(df) < 6:
+        return []
+    d = df.sort_values(tcol)
+    h = len(d) // 2
+    a, b = d.iloc[:h], d.iloc[h:]
+    ra, rb = metrics.roas(_num(a, "gmv").sum(), _num(a, "spend").sum()), metrics.roas(_num(b, "gmv").sum(), _num(b, "spend").sum())
+    if ra is None or rb is None:
+        return []
+    sa, sb = _num(a, "spend").sum(), _num(b, "spend").sum()
+    g = metrics.growth(rb, ra)
+    word = "improved" if rb > ra else "slipped" if rb < ra else "held"
+    line = (f"Fact: the second half of the period spent {fmt.inr(sb)} against {fmt.inr(sa)} in the first half, and ROAS {word} "
+            f"from {fmt.roas(ra)} to {fmt.roas(rb)}" + (f" ({fmt.signed_pct(g)})" if g is not None else "") + ".")
+    out = [line]
+    if sa > 0 and sb / sa > 1.1 and rb < ra:
+        out.append("Hypothesis: spend rose while ROAS fell, which points to diminishing returns on the extra budget rather than a demand problem.")
+    elif sa > 0 and sb / sa < 0.9 and rb > ra:
+        out.append("Hypothesis: the cut in spend lifted efficiency, so the trimmed budget was probably the weakest money.")
+    return out
+
+
+def manager_read(res: Result) -> list:
+    """Extra insight lines (labelled Fact / Hypothesis / Action) computed from the tables."""
+    out = []
+    if not res.tables:
+        return out
+    title, df = res.tables[0]
+    if df is None or df.empty:
+        return out
+    cols = set(df.columns)
+    if {"metric", "current", "previous", "change"} <= cols:
+        out += _compare_read(df)
+    else:
+        tcol = next((c for c in TIME_COLS if c in cols), None)
+        out += _series_read(df, tcol) if tcol else _rows_read(df)
+    if "roas" in cols and not any("MRP" in n for n in res.notes):
+        out.append("Fact: ROAS is GMV at MRP over spend, so it overstates real revenue; judge scale-up decisions against break-even, not against 1.00.")
+    return out
+
+
 # ------------------------------------------------------------------ notes
 _LABEL = re.compile(r"^(action|insight|fact|assumption|hypothesis|warning)\s*:\s*", re.I)
 
@@ -213,5 +328,5 @@ def narrate(res: Result) -> str:
             paras.append(text if i == 0 else f"_{title}:_ {text}")
     for title, text in res.sections:
         paras.append(f"**{title}**\n\n{text}")
-    paras += narrate_notes(res.notes)
+    paras += narrate_notes(list(res.notes) + manager_read(res))
     return "\n\n".join(paras)
