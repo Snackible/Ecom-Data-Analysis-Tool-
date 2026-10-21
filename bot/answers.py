@@ -79,18 +79,22 @@ def _metric_cell(metric, v):
     return fmt.num(v)
 
 
-def render(res: Result) -> str:
-    """Markdown for one answer. Order: date range, answer, tables, sections, notes."""
+def render_parts(res: Result):
+    """(prose, tables) as markdown. Prose leads with the date range and the
+    answer, weaves the figures into sentences and groups the notes; the tables
+    are the supporting numbers."""
+    from .narrate import narrate
     if res.kind == "empty":
-        return fmt.clean(NO_DATA)
-    parts = []
-    if res.date_range:
-        parts.append(f"_Date range: {res.date_range}_")
-    parts.append(f"**{res.headline}**" if res.headline else "")
-    for title, df in res.tables:
-        parts.append(f"\n**{title}**\n\n{_md_table(df)}")
-    for title, text in res.sections:
-        parts.append(f"\n**{title}**\n\n{text}")
-    if res.notes:
-        parts.append("\n" + "\n".join(f"- {n}" for n in dict.fromkeys(res.notes)))
-    return fmt.clean("\n".join(p for p in parts if p != ""))
+        return fmt.clean(NO_DATA), ""
+    nl = chr(10) * 2
+    head = f"_Date range: {res.date_range}_" + nl if res.date_range else ""
+    prose = fmt.clean(head + narrate(res))
+    tables = nl.join(f"**{t}**" + nl + _md_table(df) for t, df in res.tables)
+    return prose, fmt.clean(tables)
+
+
+def render(res: Result) -> str:
+    """One markdown string: prose first, then the supporting tables."""
+    prose, tables = render_parts(res)
+    nl = chr(10) * 2
+    return prose + (nl + "---" + chr(10) + "_Supporting numbers_" + nl + tables if tables else "")

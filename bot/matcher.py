@@ -17,7 +17,7 @@ from pathlib import Path
 
 from rapidfuzz import fuzz, process
 
-from .normalise import norm_text
+from .normalise import norm_match, norm_text
 
 BOT_DIR = Path(__file__).resolve().parent
 ROOT = BOT_DIR.parent
@@ -117,12 +117,12 @@ class TfidfLite:
 class Matcher:
     def __init__(self, questions_path=None, para_path=None):
         self.docs, self.routes, self.texts = load_bank(questions_path, para_path)
-        self.norm = [norm_text(t) for _, t in self.docs]
+        self.norm = [norm_match(t) for _, t in self.docs]
         self.word = TfidfLite("word", (1, 2)).fit(self.norm)
         self.char = TfidfLite("char_wb", (3, 5)).fit(self.norm)
 
     def match(self, text: str) -> Match:
-        t = norm_text(text)
+        t = norm_match(text)
         if not t:
             return Match(None, 0.0, route="none")
         sw = self.word.sims(t)
@@ -149,7 +149,7 @@ class Matcher:
         return Match(q1, s1, self.texts.get(q1, ""), "bank", s2)
 
     def suggestions(self, text: str, n: int = 3):
-        t = norm_text(text)
+        t = norm_match(text)
         hits = process.extract(t, {i: d for i, d in enumerate(self.norm)}, scorer=fuzz.WRatio, limit=12)
         seen, out = set(), []
         for _, _, i in hits:

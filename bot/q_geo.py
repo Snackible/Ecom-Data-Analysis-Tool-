@@ -220,6 +220,23 @@ def city_view(ctx: Context, p: Params, mode: str) -> Result:
         notes += _md(ctx)
         res.notes.append("Action: confirm stock in each city before any increase.")
     res.notes += notes
+    named = p.ent("cities")
+    if named and mode in ("spend", "gmv", "rank", "merged", "high_spend_weak", "strong_low_spend", "cpm_vs_avg", "overunder", "action"):
+        ranked = df.sort_values("spend", ascending=False).reset_index(drop=True)
+        acc_roas = metrics.roas(df["gmv"].sum(), df["spend"].sum())
+        lines = []
+        for c in named:
+            hit = ranked[ranked["city"].str.lower() == c.lower()]
+            if hit.empty:
+                lines.append(f"{c} has no spend in this range.")
+                continue
+            r = hit.iloc[0]
+            pos = int(hit.index[0]) + 1
+            a_, b_ = round(r["roas"] or 0, 2), round(acc_roas or 0, 2)
+            cmp_ = "in line with" if a_ == b_ else ("above" if a_ > b_ else "below")
+            lines.append(f"{r['city']} is number {pos} of {len(ranked)} cities by spend: {fmt.inr(r['spend'])} ({fmt.pct(r['spend_share'])} of spend) "
+                         f"for {fmt.inr(r['gmv'])} GMV ({fmt.pct(r['gmv_share'])} of GMV), ROAS {fmt.roas(r['roas'])}, {cmp_} the account ROAS of {fmt.roas(acc_roas)}.")
+        res.headline = " ".join(lines)
     return _fin(res, rng)
 
 

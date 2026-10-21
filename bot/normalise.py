@@ -104,3 +104,44 @@ def short_sku(product_name, sku_map) -> str:
         if name.lower() in low:
             return low[name.lower()]
     return name if len(name) <= 40 else name[:39] + "~"
+
+
+# ---- looser matching (conversational wording) ---------------------------------
+# Word-level synonyms: everyday wording -> the words the question bank uses.
+SYNONYMS = {
+    "money": "budget", "cash": "budget", "rupees": "budget", "investment": "budget",
+    "wasting": "wasteful", "wasted": "wasteful", "waste": "wasteful", "burning": "wasteful", "bleeding": "wasteful",
+    "leaking": "wasteful", "losing": "wasteful",
+    "worst": "weak", "poor": "weak", "bad": "weak", "underperforming": "weak", "terrible": "weak", "lowest": "weak",
+    "best": "strong", "winning": "strong", "top": "strong", "highest": "strong", "biggest": "strong",
+    "expensive": "costly", "pricey": "costly", "overpaying": "costly",
+    "earning": "revenue", "income": "revenue", "sales": "revenue", "returns": "revenue",
+    "doing": "performing", "going": "performing", "perform": "performing", "performance": "performing",
+    "fix": "change", "improve": "change", "tweak": "change", "adjust": "change", "modify": "change",
+    "boost": "increase", "raise": "increase", "grow": "increase", "scale": "increase", "bump": "increase",
+    "reduce": "cut", "trim": "cut", "slash": "cut", "lower": "cut", "decrease": "cut",
+    "stop": "pause", "kill": "pause", "switch": "change",
+    "terms": "queries", "searches": "queries", "searched": "queries", "phrases": "queries",
+    "towns": "cities", "metros": "cities", "locations": "cities", "regions": "cities",
+    "products": "sku", "items": "sku", "variants": "sku",
+    "ads": "ads", "advertising": "ads", "adverts": "ads",
+}
+
+
+def stem(w: str) -> str:
+    """Very light stemmer: plural and common verb endings."""
+    if len(w) <= 4 or w.isdigit():
+        return w
+    for suf, keep in (("ies", "y"), ("ing", ""), ("ed", ""), ("es", ""), ("s", "")):
+        if w.endswith(suf) and len(w) - len(suf) >= 3 and not w.endswith("ss"):
+            return w[: -len(suf)] + keep
+    return w
+
+
+def norm_match(text) -> str:
+    """norm_text plus synonyms and light stemming. Used only by the question matcher."""
+    out = []
+    for w in norm_text(text).split():
+        w = SYNONYMS.get(w, w)
+        out.append(stem(w))
+    return " ".join(out)

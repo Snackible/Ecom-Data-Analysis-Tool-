@@ -91,7 +91,7 @@ def query_waste(ctx: Context, p: Params, mode: str) -> Result:
     if mode == "below1":
         sub = df[(num(df, "roas") < 1) & (num(df, "spend") > 0)]
         sub = top(sub, n, "spend")
-        res.headline = (f"{len(df[(num(df, 'roas') < 1) & (num(df, 'spend') > 0)])} search queries have ROAS below 1.00; "
+        res.headline = (f"{fmt.num(len(df[(num(df, 'roas') < 1) & (num(df, 'spend') > 0)]))} search queries have ROAS below 1.00; "
                         f"the biggest is '{sub.iloc[0]['query']}' at {fmt.inr(sub.iloc[0]['spend'])} (ROAS {fmt.roas(sub.iloc[0]['roas'])})."
                         if not sub.empty else "No search query has ROAS below 1.00 in this range.")
         res.tables.append(("Queries below ROAS 1.00, by spend", sub[["query"] + SQ_COLS]))
@@ -102,7 +102,7 @@ def query_waste(ctx: Context, p: Params, mode: str) -> Result:
         z = ctx.set("waste_rule.zero_gmv_spend_inr")
         sub = df[(num(df, "gmv").fillna(0) == 0) & (num(df, "spend") > (z or 0))]
         sub = top(sub, n, "spend")
-        res.headline = (f"{len(df[(num(df, 'gmv').fillna(0) == 0) & (num(df, 'spend') > (z or 0))])} queries spent money with zero GMV, "
+        res.headline = (f"{fmt.num(len(df[(num(df, 'gmv').fillna(0) == 0) & (num(df, 'spend') > (z or 0))]))} queries spent money with zero GMV, "
                         f"{fmt.inr(sub['spend'].sum())} in the top {len(sub)}.") if not sub.empty \
             else "No search query spent money with zero GMV."
         res.tables.append(("Zero-GMV queries, by spend", sub[["query", "spend", "impressions", "clicks", "ctr", "cpm"]]))

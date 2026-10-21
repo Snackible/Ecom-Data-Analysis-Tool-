@@ -297,7 +297,9 @@ def run(ctx: Context, p: Params, text: str) -> Result:
     r0 = d2.iloc[0]
     res.headline = f"{'Lowest' if s.ascending else 'Highest'} {col} by {d}: {r0[d]} at {FMT.get(col, fmt.num)(r0[col])}."
     show = [d] + [c for c in dict.fromkeys([col, "spend", "impressions", "clicks", "ctr", "cpm", "gmv", "roas"]) if c in d2.columns]
-    res.tables.append((f"Top {len(d2)} {d}s by {col}" if not s.ascending else f"Bottom {len(d2)} {d}s by {col}", d2[show]))
+    plural = {"city": "cities", "query": "queries", "campaign": "campaigns", "keyword": "keywords", "product": "SKUs",
+              "placement": "placements", "match_type": "match types", "bidding": "bidding types"}.get(d, d + "s")
+    res.tables.append((f"Top {len(d2)} {plural} by {col}" if not s.ascending else f"Bottom {len(d2)} {plural} by {col}", d2[show]))
     if col in ("cpm",) and d == "placement":
         notes.append("Fact: compare CPM within the same placement.")
     if s.min_impr:

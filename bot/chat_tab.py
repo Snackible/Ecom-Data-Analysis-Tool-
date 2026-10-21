@@ -4,6 +4,7 @@ import streamlit as st
 from . import answers, engine, settings as settings_mod
 
 HISTORY_KEY = "ads_bot_history"
+PREV_KEY = "ads_bot_prev"
 EXAMPLES = [
     "Which city is consuming more budget?",
     "Which search queries spent the most with ROAS below 1?",
@@ -23,10 +24,17 @@ def _unset_settings(s: dict) -> list:
     return out
 
 
+def _show(msg: dict):
+    st.markdown(msg["content"])
+    if msg.get("tables"):
+        with st.expander("Supporting numbers"):
+            st.markdown(msg["tables"])
+
+
 def render():
     st.subheader("Ads Bot")
-    st.caption("Ask in plain English. Answers come from the loaded Instamart ads data only and are computed locally "
-               "(no external AI service). Text and small tables, no charts.")
+    st.caption("Ask in plain English. Answers are written from the loaded Instamart ads data and computed locally "
+               "(no external AI service). You can follow up, for example: \"and for Mumbai?\" or \"top 20 instead\".")
     if HISTORY_KEY not in st.session_state:
         st.session_state[HISTORY_KEY] = []
     hist = st.session_state[HISTORY_KEY]
@@ -40,11 +48,12 @@ def render():
             st.markdown(f"{len(unset)} settings in `bot/settings.yaml` are still empty. Answers that need them say `needs setting: <name>`.")
     if hist and st.button("Clear chat"):
         st.session_state[HISTORY_KEY] = []
+        st.session_state[PREV_KEY] = None
         st.rerun()
 
     for m in hist:
         with st.chat_message(m["role"]):
-            st.markdown(m["content"])
+            _show(m)
 
     prompt = st.chat_input("Ask about the Instamart ads data")
     if prompt:
@@ -54,8 +63,12 @@ def render():
         with st.chat_message("assistant"):
             with st.spinner("Working it out from the data..."):
                 try:
-                    md = answers.render(engine.ask(prompt))
+                    res = engine.ask(prompt, prev=st.session_state.get(PREV_KEY))
+                    prose, tables = answers.render_parts(res)
+                    if res.meta:
+                        st.session_state[PREV_KEY] = res.meta
                 except Exception:
-                    md = "Something went wrong answering that. Try rephrasing it."
-            st.markdown(md)
-        hist.append({"role": "assistant", "content": md})
+                    prose, tables = "Something went wrong answering that. Try rephrasing it.", ""
+            msg = {"role": "assistant", "content": prose, "tables": tables}
+            _show(msg)
+        hist.append(msg)

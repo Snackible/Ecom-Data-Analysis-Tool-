@@ -94,3 +94,26 @@ def test_route_suffix_for_new_questions(tmp_path):
     m = Matcher(q, p)
     assert m.match("How many keywords run in Pune?").route == "flex"
     assert m.match("Which city gets the largest spend?").qn in (1, 2) or True
+
+
+# conversational wording the synonym/stemming layer should understand
+CONVERSATIONAL = [
+    ("where is all my money going by city", 2),
+    ("which cities are bleeding money", 59),
+    ("how are we performing overall this week", 12),
+    ("what should we fix first today", 21),
+    ("which towns give the best returns on ads", 3),
+    ("are we wasting money on useless searches", 25),
+    ("which terms should i block", 31),
+    ("which of my skus are performing worst", 69),
+    ("how much could i save by cutting the bad queries", 33),
+    ("where should i put 50k extra", 96),
+    ("which campaigns are underperforming compared to last week", 20),
+    ("is brand protection holding position", 84),
+]
+
+
+@pytest.mark.parametrize("phrase,expected", CONVERSATIONAL)
+def test_conversational_wording(phrase, expected):
+    m = M.match(phrase)
+    assert m.qn == expected, f"{phrase!r} -> {m.qn} (score {m.score:.2f}, 2nd {m.second:.2f}, best {m.text[:50]!r})"

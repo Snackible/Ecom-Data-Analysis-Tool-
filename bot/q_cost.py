@@ -1,5 +1,6 @@
 """Cost, health, campaign, budget and cross-check intents."""
 import math
+import re
 from datetime import timedelta
 
 import pandas as pd
@@ -338,10 +339,12 @@ def health(ctx: Context, p: Params, mode: str) -> Result:
             m = x.merge(y, on="campaign", suffixes=("", "_prev"))
             m["roas_change"] = [metrics.growth(u, v) for u, v in zip(num(m, "roas"), num(m, "roas_prev"))]
             m["gmv_change"] = m["gmv"] - m["gmv_prev"]
-            t = top(m, p.top_n, "roas_change")
-            res.headline = (f"{t.iloc[0]['campaign']} improved most: ROAS {fmt.signed_pct(t.iloc[0]['roas_change'])} "
+            worse = bool(re.search(r"worse|declin|drop|fell|fall|underperform|down|slip", p.text or "", re.I))
+            t = top(m, p.top_n, "roas_change", asc=worse)
+            verb = "declined" if worse else "improved"
+            res.headline = (f"{t.iloc[0]['campaign']} {verb} most: ROAS {fmt.signed_pct(t.iloc[0]['roas_change'])} "
                             f"({fmt.roas(t.iloc[0]['roas_prev'])} to {fmt.roas(t.iloc[0]['roas'])}).") if not t.empty else "No data."
-            res.tables.append(("Campaigns by ROAS improvement", t[["campaign", "spend", "roas_prev", "roas", "roas_change", "gmv_change"]]))
+            res.tables.append((f"Campaigns by ROAS {'decline' if worse else 'improvement'}", t[["campaign", "spend", "roas_prev", "roas", "roas_change", "gmv_change"]]))
         notes += _md(ctx)
         tab = pd.DataFrame()
     res.notes += notes
