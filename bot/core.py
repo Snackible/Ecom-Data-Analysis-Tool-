@@ -75,6 +75,7 @@ class Result:
     kind: str = "ok"                              # ok | empty | needs_setting | data_not_loaded | unknown
     date_range: str = ""
     meta: dict = field(default_factory=dict)       # memory of this answer, used for follow-ups
+    suggestions: list = field(default_factory=list)  # follow-up questions offered as buttons
 
 
 def empty_result() -> Result:

@@ -26,6 +26,9 @@ ENT_ORDER = [("queries", "query"), ("cities", "city"), ("keywords", "keyword"), 
              ("campaigns", "campaign"), ("placements", "placement")]
 LABEL_COLS = {"query": "query", "search_query": "query", "keyword": "keyword", "city": "city", "product": "product",
               "sku": "product", "campaign": "campaign", "placement": "placement"}
+TAB_LABELS = (("📊", "What"), ("❓", "Why"), ("⚙️", "How"), ("🎯", "Whom"), ("🔗", "Similarity"), ("🧭", "Cause"), ("🎬", "Do next"))
+GENERIC_SUGGESTIONS = ["What changes should I make this week?", "How did spend and ROAS change versus last week?",
+                       "What should my negative keyword list be?", "Which cities should I cut, hold or scale?"]
 GAP = 0.10         # within 10% of the peer counts as "in line" (labelled assumption in the output)
 WEAK = 0.25        # a stage more than 25% worse than the peer is named as a cause
 LEAK_SHARE = 0.25  # a slice below 1.00 ROAS holding this share of spend is called out as a drag
@@ -237,6 +240,7 @@ def build(ctx: Context, p: Params, res: Result) -> list:
     how, drags, active = [], {}, {}
     dims = [d for d in (GRAN_DIMS if table == "granular" else SQ_DIMS) if d != dim]
     cities_info = None
+    ent_names = {}
     for d in dims:
         df, _ = ctx.fetch(table, (d,), period, filt, limit=8)
         if df.empty:
@@ -244,6 +248,8 @@ def build(ctx: Context, p: Params, res: Result) -> list:
         n = _distinct(ctx, table, d, period, filt)
         line, drag = _spend_share_line(d, df, spend, r["roas"])
         active[d] = n
+        if d in ("campaign", "keyword", "city"):
+            ent_names[d] = (df, drag)
         how.append(f"- **{DIM_NAME[d]}** ({n} active): {line}.")
         if drag:
             drags[d] = drag
@@ -358,4 +364,16 @@ def build(ctx: Context, p: Params, res: Result) -> list:
     else:
         recs.append(f"Fact: break-even ROAS is {fmt.roas(be)}; this is {'above' if (r['roas'] or 0) >= be else 'below'} it at ROAS {fmt.roas(r['roas'])}.")
     sections.append(("🎬 RECOMMENDATION", "\n".join(f"- {x}" for x in recs)))
+    sug = []
+    for d, (df, drag) in ent_names.items():
+        if drag:
+            nm = _nm(max(drag, key=lambda x: x[0])[1][d], d)
+            if not nm.startswith("("):
+                sug.append(f"and for {nm}?")
+        ok = df[(df["roas"].notna()) & (df["spend"] > 0)]
+        if not ok.empty:
+            nm = _nm(ok.sort_values("roas", ascending=False).iloc[0][d], d)
+            if not nm.startswith("(") and f"and for {nm}?" not in sug:
+                sug.append(f"and for {nm}?")
+    res.suggestions = (sug[:2] + [g for g in GENERIC_SUGGESTIONS if g.lower().rstrip("?") != str(res.meta.get("text", "")).lower().rstrip("?")])[:4]
     return sections

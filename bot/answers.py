@@ -98,3 +98,23 @@ def render(res: Result) -> str:
     prose, tables = render_parts(res)
     nl = chr(10) * 2
     return prose + (nl + "---" + chr(10) + "_Supporting numbers_" + nl + tables if tables else "")
+
+
+def render_struct(res: Result) -> dict:
+    """The same answer as render_parts, split for the chat UI: headline, lead
+    paragraph, deep-dive sections (kept as separate blocks for tabs), other
+    sections and notes, supporting tables, and follow-up suggestions."""
+    from . import narrate as nar
+    from .deepdive import TAB_LABELS
+    if res.kind == "empty":
+        return {"head": fmt.clean(NO_DATA), "date": "", "lead": "", "deep": [], "extra": "", "notes": "", "tables": "", "suggestions": []}
+    nl = chr(10) * 2
+    prefixes = tuple(e for e, _ in TAB_LABELS)
+    deep = [(next(lbl for e, lbl in TAB_LABELS if t.startswith(e)), fmt.clean(t), fmt.clean(x)) for t, x in res.sections if t.startswith(prefixes)]
+    other = [(t, x) for t, x in res.sections if not t.startswith(prefixes)]
+    lead = nl.join(d for i, (t, df) in enumerate(res.tables) for d in [nar.describe_table(t, df, full=(i == 0))] if d and i == 0)
+    extra = nl.join(f"**{t}**" + nl + x for t, x in other)
+    notes = nl.join(nar.narrate_notes(list(res.notes) + nar.manager_read(res)))
+    tables = nl.join(f"**{t}**" + nl + _md_table(df) for t, df in res.tables)
+    return {"date": res.date_range or "", "head": fmt.clean(res.headline or ""), "lead": fmt.clean(lead), "deep": deep,
+            "extra": fmt.clean(extra), "notes": fmt.clean(notes), "tables": fmt.clean(tables), "suggestions": list(res.suggestions)}

@@ -118,3 +118,10 @@ def test_similarity_index_is_word_overlap():
     from bot.deepdive import jaccard
     assert jaccard("healthy snacks", "snacks healthy") == 1.0
     assert jaccard("chips", "ragi chips") == 0.5 and jaccard("a", "b") == 0.0
+
+
+def test_struct_has_tabs_and_suggestions(two_months):
+    r = engine.ask("which city is consuming more budget", log=False)
+    s = answers.render_struct(r)
+    assert [d[0] for d in s["deep"]][:2] == ["What", "Why"] and s["lead"] and s["tables"]
+    assert 1 <= len(s["suggestions"]) <= 4 and all(x.endswith("?") for x in s["suggestions"])
