@@ -2,7 +2,7 @@
 import re
 from datetime import date
 
-from . import flex, matcher as matcher_mod, q_cost, queries
+from . import deepdive, flex, matcher as matcher_mod, q_cost, queries
 from .core import Context, Params, Result, empty_result
 from .params import Period, extract_entities, extract_top_n, parse_dates
 
@@ -171,6 +171,11 @@ def ask(text: str, settings: dict | None = None, log: bool = True, log_path=None
             warn = q_cost.table_crosscheck(ctx)
             if warn:
                 res.notes.insert(0, "Warning: the tables do not agree for search placements: " + "; ".join(warn))
+        if res.kind == "ok" and route in ("bank", "flex") and qn not in CHECK_SKIP:
+            try:
+                res.sections += deepdive.build(ctx, p, res)
+            except Exception as e:  # the deep dive must never break an answer
+                res.notes.append(f"Fact: the deep dive could not be built ({type(e).__name__}).")
         if route in ("bank", "flex") and res.kind != "unknown":
             res.meta = snapshot(run_text, qn, route, p)
         return res

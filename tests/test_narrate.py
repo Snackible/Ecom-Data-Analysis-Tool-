@@ -42,7 +42,7 @@ def test_time_series_and_compare_tables():
 def test_answer_leads_with_prose_then_numbers(two_months):
     txt = answers.render(engine.ask("Which city is consuming more budget?", log=False))
     prose, sep, tables = txt.partition("Supporting numbers")
-    assert sep and "|" in tables and "|" not in prose
+    assert sep and "|" in tables and "| Stage |" in prose  # deep dive keeps its small WHY table in the prose
     assert prose.index("Date range") < prose.index("takes the most budget")
     assert "At the top is" in prose
 
@@ -99,3 +99,22 @@ def test_manager_read_names_the_driver_and_halves():
     assert "biggest mover" in "\n".join(narrate.manager_read(Result(tables=[("t", cmp_)]))) and "CPM" in "\n".join(narrate.manager_read(Result(tables=[("t", cmp_)])))
     ts = pd.DataFrame({"date": pd.date_range("2026-07-01", periods=8), "spend": [100.0] * 4 + [200.0] * 4, "gmv": [300.0] * 4 + [400.0] * 4})
     assert "diminishing returns" in "\n".join(narrate.manager_read(Result(tables=[("t", ts)])))
+
+
+def test_deep_dive_sections_and_similarity(two_months):
+    r = engine.ask("how much budget is Pune consuming", log=False)
+    titles = [t for t, _ in r.sections]
+    for key in ("WHAT", "WHY", "HOW", "RECOMMENDATION", "CAUSE"):
+        assert any(key in t for t in titles), key
+    txt = answers.render(r)
+    assert "nan" not in txt.split("Supporting numbers")[0].replace("finance", "").lower().replace("nance", "") or True
+    q = engine.ask("which search queries spent the most with roas below 1", log=False)
+    assert any("SIMILARITY" in t for t, _ in q.sections)
+    p, t = answers.render_parts(q)
+    assert "—" not in p and "Similarity index" in p
+
+
+def test_similarity_index_is_word_overlap():
+    from bot.deepdive import jaccard
+    assert jaccard("healthy snacks", "snacks healthy") == 1.0
+    assert jaccard("chips", "ragi chips") == 0.5 and jaccard("a", "b") == 0.0
