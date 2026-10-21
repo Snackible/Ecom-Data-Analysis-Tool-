@@ -1,4 +1,4 @@
-"""Streamlit chat tab for the Ads Bot. Fully local: no external API or LLM."""
+"""Streamlit chat tab for Snack Diva (the Ads Bot). Fully local: no external API or LLM."""
 import streamlit as st
 
 from . import answers, engine, settings as settings_mod
@@ -32,8 +32,8 @@ def _show(msg: dict):
 
 
 def render():
-    st.subheader("Ads Bot")
-    st.caption("Ask in plain English. Answers are written from the loaded Instamart ads data and computed locally "
+    st.subheader("💅 Snack Diva")
+    st.caption("Ask Snack Diva in plain English. Answers are written from the loaded Instamart ads data and computed locally "
                "(no external AI service). You can follow up, for example: \"and for Mumbai?\" or \"top 20 instead\".")
     if HISTORY_KEY not in st.session_state:
         st.session_state[HISTORY_KEY] = []

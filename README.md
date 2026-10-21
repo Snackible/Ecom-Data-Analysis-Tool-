@@ -167,9 +167,9 @@ tradeoff is worth reconsidering.
   bold high-contrast palette.
 - Password-gated when `DASHBOARD_PASSWORD` is set (hosted deployment only).
 
-## Ads Bot
+## Ads Bot (Snack Diva)
 
-A chat view in the dashboard (sidebar **View** > **💬 Ads Bot**, behind the same password gate) that answers plain-English questions about the Instamart ads data. It is **fully local**: no Claude, OpenAI, Groq or other external API or LLM calls. Answers are text plus small tables, lead with the answer, and start with the date range analysed (taken from the data, never hardcoded).
+A chat view in the dashboard (sidebar **View** > **💬 Snack Diva**, behind the same password gate) that answers plain-English questions about the Instamart ads data. It is **fully local**: no Claude, OpenAI, Groq or other external API or LLM calls. Answers are text plus small tables, lead with the answer, and start with the date range analysed (taken from the data, never hardcoded).
 
 ```
 bot/settings.yaml   Your business rules and thresholds (all empty until you fill them)

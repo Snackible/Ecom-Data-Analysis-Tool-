@@ -955,7 +955,7 @@ if total_rows == 0:
 # so a heavy view doesn't re-render just because the user opened a tab.
 view_mode = st.sidebar.radio(
     "📍 View",
-    ["📊 Main dashboard", "🔍 Search Query deep dive", "🤖 Analyst Engine", "🔍 Typo Detector", "📈 Correlations", "💬 Ads Bot"],
+    ["📊 Main dashboard", "🔍 Search Query deep dive", "🤖 Analyst Engine", "🔍 Typo Detector", "📈 Correlations", "💬 Snack Diva"],
     label_visibility="visible",
 )
 st.sidebar.markdown("---")
@@ -1044,7 +1044,7 @@ if view_mode == "📈 Correlations":
     )
     st.stop()
 
-if view_mode == "💬 Ads Bot":
+if view_mode == "💬 Snack Diva":
     from bot import chat_tab
     chat_tab.render()
     st.stop()
