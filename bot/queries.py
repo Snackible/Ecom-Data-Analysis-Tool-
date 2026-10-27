@@ -1,0 +1,126 @@
+"""One entry per question number: which intent function answers it.
+
+Every function takes (ctx, params) and returns a Result. SQL lives in
+core.Context (whitelisted names + bound parameters only); no SQL is built
+from user text.
+"""
+from . import q_cost as C, q_extra as X, q_geo as G, q_review as R, q_search as S
+from .core import Context, Params, Result, empty_result
+
+# qn -> callable(ctx, p)
+Q = {
+    1: lambda c, p: S.query_waste(c, p, "drag"),
+    2: lambda c, p: G.city_view(c, p, "spend"),
+    3: lambda c, p: G.city_view(c, p, "gmv"),
+    4: lambda c, p: G.sku_city_keyword(c, p, "best"),
+    5: lambda c, p: R.full_review(c, p),
+    6: lambda c, p: R.full_review(c, p),
+    7: lambda c, p: C.campaign_budget(c, p),
+    8: lambda c, p: S.bucket_split(c, p, "split"),
+    9: lambda c, p: S.match_type_view(c, p, "fixlist"),
+    10: lambda c, p: S.more_keywords(c, p),
+    11: lambda c, p: G.sku_city_keyword(c, p, "city_campaign"),
+    12: lambda c, p: C.health(c, p, "verdict"),
+    13: lambda c, p: C.health(c, p, "wow"),
+    14: lambda c, p: C.health(c, p, "top3"),
+    15: lambda c, p: C.health(c, p, "why"),
+    16: lambda c, p: C.health(c, p, "lag"),
+    17: lambda c, p: C.health(c, p, "no_sku"),
+    18: lambda c, p: C.health(c, p, "a2s"),
+    19: lambda c, p: C.health(c, p, "campaigns_waste"),
+    20: lambda c, p: C.health(c, p, "improved"),
+    21: lambda c, p: R.weekly_actions(c, p, "one_thing"),
+    22: lambda c, p: S.query_waste(c, p, "below1"),
+    23: lambda c, p: S.query_waste(c, p, "zero_gmv"),
+    24: lambda c, p: S.query_waste(c, p, "top_wasteful"),
+    25: lambda c, p: S.query_waste(c, p, "irrelevant"),
+    26: lambda c, p: S.query_waste(c, p, "high_ctr_poor_conv"),
+    27: lambda c, p: S.query_waste(c, p, "good_low_spend"),
+    28: lambda c, p: S.new_queries(c, p),
+    29: lambda c, p: S.themes(c, p),
+    30: lambda c, p: S.themes(c, p, True),
+    31: lambda c, p: S.query_waste(c, p, "negatives"),
+    32: lambda c, p: S.more_keywords(c, p),
+    33: lambda c, p: S.query_waste(c, p, "saving"),
+    34: lambda c, p: S.match_type_view(c, p, "compare"),
+    35: lambda c, p: S.match_type_view(c, p, "broad_spill"),
+    36: lambda c, p: S.match_type_view(c, p, "snackible_broad"),
+    37: lambda c, p: S.match_type_view(c, p, "competitor_spill"),
+    38: lambda c, p: S.match_type_view(c, p, "keyword_focus"),
+    39: lambda c, p: S.match_type_view(c, p, "to_exact"),
+    40: lambda c, p: S.match_type_view(c, p, "narrow_exact"),
+    41: lambda c, p: S.match_type_view(c, p, "compete"),
+    42: lambda c, p: X.keyword_served(c, p),
+    43: lambda c, p: S.match_type_view(c, p, "spill_share"),
+    44: lambda c, p: S.match_type_view(c, p, "fixlist"),
+    45: lambda c, p: S.bucket_split(c, p, "by_match"),
+    46: lambda c, p: C.placement_cost(c, p, "cpm_by_placement"),
+    47: lambda c, p: S.query_waste(c, p, "high_cpm"),
+    48: lambda c, p: C.placement_cost(c, p, "high_cpm_low_ctr"),
+    49: lambda c, p: C.placement_cost(c, p, "bidding_compare"),
+    50: lambda c, p: C.placement_cost(c, p, "cpc_over"),
+    51: lambda c, p: C.placement_cost(c, p, "collection_worth"),
+    52: lambda c, p: C.placement_cost(c, p, "cpm_poor_rank"),
+    53: lambda c, p: C.placement_cost(c, p, "top_rank_no_return"),
+    54: lambda c, p: C.placement_cost(c, p, "unspent_budget"),
+    55: lambda c, p: C.placement_cost(c, p, "cpm_trend"),
+    56: lambda c, p: C.placement_cost(c, p, "cost_per_order"),
+    57: lambda c, p: C.placement_cost(c, p, "lower_bids"),
+    58: lambda c, p: G.city_view(c, p, "rank"),
+    59: lambda c, p: G.city_view(c, p, "high_spend_weak"),
+    60: lambda c, p: G.city_view(c, p, "strong_low_spend"),
+    61: lambda c, p: G.city_view(c, p, "share_check"),
+    62: lambda c, p: G.city_view(c, p, "keyword_waste"),
+    63: lambda c, p: G.city_view(c, p, "cpm_vs_avg"),
+    64: lambda c, p: G.city_view(c, p, "worse"),
+    65: lambda c, p: G.city_view(c, p, "merged"),
+    66: lambda c, p: G.city_view(c, p, "tier"),
+    67: lambda c, p: G.city_view(c, p, "action"),
+    68: lambda c, p: G.sku_view(c, p, "rank"),
+    69: lambda c, p: G.sku_view(c, p, "heavy_weak"),
+    70: lambda c, p: G.sku_view(c, p, "strong_room"),
+    71: lambda c, p: G.sku_view(c, p, "mismatch"),
+    72: lambda c, p: G.sku_view(c, p, "drivers"),
+    73: lambda c, p: G.sku_view(c, p, "ctr_conv"),
+    74: lambda c, p: G.sku_view(c, p, "cannibal"),
+    75: lambda c, p: G.sku_view(c, p, "more_spend"),
+    76: lambda c, p: G.sku_view(c, p, "wasteful_city"),
+    77: lambda c, p: G.sku_view(c, p, "grid"),
+    78: lambda c, p: S.bucket_split(c, p, "split"),
+    79: lambda c, p: S.bucket_split(c, p, "served"),
+    80: lambda c, p: S.bucket_split(c, p, "defend_on_brand"),
+    81: lambda c, p: X.competitor_view(c, p, "keep_cut"),
+    82: lambda c, p: X.competitor_view(c, p, "named"),
+    83: lambda c, p: X.competitor_view(c, p, "closest"),
+    84: lambda c, p: X.brand_defence(c, p, "defence"),
+    85: lambda c, p: X.brand_defence(c, p, "gts"),
+    86: lambda c, p: X.expand_engines(c, p),
+    87: lambda c, p: S.more_keywords(c, p),
+    88: lambda c, p: S.bucket_split(c, p, "attack_leak"),
+    89: lambda c, p: S.bucket_split(c, p, "scorecard"),
+    90: lambda c, p: C.unavailable(c, p, "stock"),
+    91: lambda c, p: C.unavailable(c, p, "stock"),
+    92: lambda c, p: C.unavailable(c, p, "stock"),
+    93: lambda c, p: C.unavailable(c, p, "stock"),
+    94: lambda c, p: C.unavailable(c, p, "stock"),
+    95: lambda c, p: R.budget_move(c, p, "cut"),
+    96: lambda c, p: R.budget_move(c, p, "add"),
+    97: lambda c, p: C.unavailable(c, p, "budget_log"),
+    98: lambda c, p: R.keyword_payback(c, p),
+    99: lambda c, p: R.phasing(c, p),
+    100: lambda c, p: R.budget_move(c, p, "table"),
+    101: lambda c, p: X.risks_measure(c, p, "risks"),
+    102: lambda c, p: X.risks_measure(c, p, "measure"),
+}
+for _n in range(103, 112):
+    Q[_n] = (lambda n: (lambda c, p: R.judgement(c, p, n)))(_n)
+
+# the intent of each question that is a full table crosscheck-worthy analysis
+NO_CROSSCHECK = {90, 91, 92, 93, 94, 97}
+
+
+def run_question(ctx: Context, p: Params, qn: int) -> Result:
+    fn = Q.get(qn)
+    if fn is None:
+        return Result(headline="That question is not wired up yet.", kind="unknown")
+    return fn(ctx, p)

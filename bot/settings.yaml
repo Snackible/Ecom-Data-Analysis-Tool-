@@ -1,0 +1,80 @@
+# Ads Bot settings. Every value starts as null. The bot reads this file at
+# runtime and says "needs setting: <key>" for any null value it needs.
+# Edit and save; no restart is needed beyond refreshing the page.
+
+# Monthly Instamart ads budget in rupees. Needed by Q99.
+monthly_budget_inr: null
+# Monthly Instamart GMV target in rupees. Needed by Q99, Q111.
+monthly_gmv_target_inr: null
+# Target A2S as a percent (e.g. 12). Needed by Q18, Q99.
+target_a2s_pct: null
+# A2S ceiling as a percent. Needed by Q18, Q99.
+a2s_ceiling_pct: null
+# Sales figure A2S divides by: the word total_gmv (use the report GMV) or a rupee number for the period. Needed by Q18.
+a2s_sales_basis: null
+# Contribution before ads as a fraction of MRP GMV (0.30 means 30%). Break-even ROAS = 1 / this.
+# Needed by any question that says "below break-even": Q1, Q4, Q7, Q27, Q58, Q60, Q95 to Q100.
+contribution_before_ads_pct_of_mrp_gmv: null
+# Return and investment definition for ROI (ROI is not ROAS). Only used if asked for ROI.
+roi_definition: null
+# Target spend split as fractions or percents that sum to 100. Needed by Q8, Q78, Q89.
+split_target:
+  attack: null
+  expand: null
+  defend: null
+# Minimum acceptable ROAS per bucket. Needed by Q45, Q79, Q86, Q89.
+min_roas:
+  attack: null
+  expand: null
+  defend: null
+# List of priority cities. Needed by Q61, Q67.
+priority_cities: null
+# Map of city name to tier, e.g. {Mumbai: "Tier 1"}. Needed by Q66.
+city_tiers: null
+# Lists of SKU short names. Needed by Q70, Q75.
+hero_skus: null
+growth_skus: null
+skus_not_to_push: null
+# Map of SKU short name to a list of key words in its name, e.g. {"Cheese Dosa Khakra": [khakra, cheese, dosa]}.
+# Needed by Q25, Q71 (a search "does not match" a SKU when it holds none of these words).
+sku_keywords: null
+# Map of raw product title to short SKU name, e.g. {"snackible cheese dosa khakra - roasted...": "Cheese Dosa Khakra"}.
+# Needed by Q4, Q68 to Q77. Until filled, raw titles are shown truncated to 40 characters.
+product_title_to_sku: null
+# Acceptable CPM (cost per 1,000 impressions) by ad placement, e.g. {"Keyword Based Ads": 120}.
+# Needed by Q50, Q57.
+cpm_acceptable_by_placement: null
+# Acceptable CPC by bucket, e.g. {attack: 12, expand: 10, defend: 6}. Needed by Q50, Q57.
+cpc_acceptable_by_bucket: null
+# Minimum data before judging anything. Below this the bot says "too little data". Needed by most questions.
+min_data:
+  spend_inr: null
+  clicks: null
+  days: null
+# Waste rule: spend >= spend_inr AND ROAS < roas_below over >= over_days, OR spend >= zero_gmv_spend_inr with zero GMV.
+# Needed by Q1, Q23, Q24, Q31, Q33, Q95.
+waste_rule:
+  spend_inr: null
+  roas_below: null
+  over_days: null
+  zero_gmv_spend_inr: null
+# Scale rule: ROAS >= roas_at_least with spend >= spend_inr. Stock is never in the data, so every scale advice says so.
+# Needed by Q7, Q70, Q75, Q96, Q100.
+scale_rule:
+  roas_at_least: null
+  spend_inr: null
+# Budget increase step in percent (e.g. 15). Needed by Q7, Q96.
+budget_increase_step_pct: null
+# Maximum number of actions in a weekly action table. Needed by Q5, Q6.
+max_weekly_actions: null
+# Attribution lag in days. Days inside this window are "still collecting sales". Needed by Q12 to Q16, Q64, Q92, Q103, Q104.
+lag_days: null
+# Extra terms added to the built-in defend and attack lists. Lists of lowercase strings.
+defend_terms: []
+attack_terms: []
+# Competitor closeness tiers. Lists of lowercase competitor names. Needed by Q81, Q83.
+competitor_closeness:
+  close: []
+  far: []
+# Map of campaign name to list of SKU short names, for Collection Ads and similar. Needed by Q17, Q71, Q75.
+collection_ads_sku_map: null

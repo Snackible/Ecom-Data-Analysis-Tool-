@@ -166,3 +166,59 @@ tradeoff is worth reconsidering.
 - **Dark/light theme toggle** (light, true-white-based, is the default),
   bold high-contrast palette.
 - Password-gated when `DASHBOARD_PASSWORD` is set (hosted deployment only).
+
+## Ads Bot (Snack Diva)
+
+A chat view in the dashboard (sidebar **View** > **💬 Snack Diva**, behind the same password gate) that answers plain-English questions about the Instamart ads data. It is **fully local**: no Claude, OpenAI, Groq or other external API or LLM calls. Answers are text plus small tables, lead with the answer, and start with the date range analysed (taken from the data, never hardcoded).
+
+```
+bot/settings.yaml   Your business rules and thresholds (all empty until you fill them)
+bot/questions.md    The 111 supported questions (the matcher reads this file)
+bot/paraphrases.txt Extra phrasings that route to a question number
+bot/capabilities.md What each question needs: data, settings, and what it does when they are missing
+bot/matcher.py      Local fuzzy + TF-IDF question matcher, writes logs/miss_log.csv
+bot/engine.py       question text -> answer (matcher, parameters, SQL intents, free-form engine)
+bot/queries.py      Question number -> intent function (all SQL is parameterised; no SQL from user text)
+bot/flex.py         Free-form engine: lookups, top N, trends, comparisons, shares, counts, outliers
+bot/chat_tab.py     The Streamlit tab
+tests/              pytest suite on a synthetic DuckDB (never real data)
+```
+
+Run the tests with `python -m pytest tests`.
+
+### Fill in settings.yaml
+
+Open `bot/settings.yaml`; every key has a comment saying what it is and which questions need it. Leave a value `null` (or an empty list) if you do not know it yet. A question that needs an empty setting still returns the numbers it can, and says `needs setting: <name>` for the part that depends on it. The most useful ones to fill first: `contribution_before_ads_pct_of_mrp_gmv` (break-even ROAS is 1 divided by this, as a fraction such as 0.30), `min_data`, `waste_rule`, `lag_days`, `product_title_to_sku`, `max_weekly_actions`. `a2s_sales_basis` accepts `total_gmv` (use the report's GMV) or a rupee number for the period. Changes are read on the next question; no restart is needed.
+
+### What "needs setting" and "data not loaded" mean
+
+- `needs setting: <key>`: the answer depends on a value in `bot/settings.yaml` that is still empty. Fill it in and ask again.
+- `data not loaded: <item>`: the data does not exist in any loaded table (stock and fill rate, new-to-brand, a budget change log, a SKU map for Collection Ads and similar). The bot never guesses these. It offers the closest answerable view instead.
+- `too little data`: a row is below `min_data`, so it is not judged and never recommended for a pause.
+- Search query x city is never available (neither report has both). The bot says so and offers keyword x city (granular) or search query x keyword (search_query).
+
+### Add a question
+
+Add a numbered line to `bot/questions.md` and tell it where to go:
+
+```
+112. How many keywords run in Pune? => flex
+113. Which city gets the largest spend? => Q2
+```
+
+`=> flex` sends it to the free-form engine; `=> Q2` reuses question 2's handler. Extra ways of phrasing an existing question go in `bot/paraphrases.txt` as `2 | where is most of my money going`. Anything that is not in the bank but is about the ads data (metrics, cities, SKUs, keywords, queries, dates) is answered by the free-form engine automatically.
+
+### The miss log
+
+Every question that the matcher could not map to the bank is appended to `logs/miss_log.csv` (git-ignored) with the time, the question, the closest bank question, the score, and how it was handled (`flex` answered it freely, `unanswered`, or `error:...`). Review it now and then and promote repeated misses into `questions.md` or `paraphrases.txt`.
+
+### Add a new month of data
+
+Nothing changes for the bot. Load the new `IM_GRANULAR_*`, `IM_CAMPAIGN_X_SEARCH_QUERY_*` and `IM_SUMMARY_*` files exactly as described above (upload panel or `python ingest.py`). The bot discovers months, campaigns, cities, SKUs, keywords and queries from the database at question time, so no code or setting names a month. Relative phrases ("last week", "this month") count from today in Asia/Kolkata, or from the latest loaded date when the data is older than today (the answer says so). Weeks start on Monday.
+
+### Notes on the data
+
+- Spend is `total_budget_burnt`; `total_budget` is a daily budget repeated on every row and is never summed.
+- ROAS is `total_gmv / spend` and is at MRP, so it overstates real revenue. CPM is spend per 1,000 impressions, not the report's `ecpm`. Ratios are recomputed from totals, never averaged.
+- `Noida` and `Noida 1` are merged in city views; other possible duplicate city names are flagged, not merged.
+- Before analysis the bot checks that granular and search_query agree for search placements and shows a warning if they do not. A summary file whose period does not overlap the granular dates is reported as not comparable, not as a mismatch.

@@ -11,3 +11,7 @@ data/processed/*.csv
 !data/incoming/.gitkeep
 !data/processed/.gitkeep
 # Note: compressed .csv.gz IS tracked (Git-friendly; auto-rebuilds DB on startup)
+
+# Ads Bot
+logs/
+docs/*.pdf

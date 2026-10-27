@@ -1,0 +1,221 @@
+# Extra phrasings that route to a question. Format:  <question number> | <phrase>
+# Add lines freely; the matcher reads this file together with questions.md.
+1 | which search queries are dragging down roas of a keyword
+1 | search queries with lots of impressions and spend but little revenue
+1 | what queries are hurting my keyword roas
+2 | which city spends the most budget
+2 | where is most of my money going by city
+3 | which city makes the most ads revenue
+3 | top city by gmv
+4 | best sku city keyword combination
+4 | which sku x city x keyword works best
+5 | what should i change this week
+5 | weekly changes to make
+5 | what are your recommendations for this week
+6 | give me your analysis
+6 | full review of instamart ads
+6 | analyse my ads performance
+7 | which campaigns deserve more budget
+7 | where should i raise budgets
+7 | campaigns to increase daily budget
+8 | attack expand defend split
+8 | how is my budget split between attack defend and expand
+8 | spend split competitor category and brand keywords
+9 | which keywords need a different match type
+9 | what should be moved from broad to exact
+10 | suggest more keywords for a campaign
+10 | new keyword ideas based on what works
+11 | should i run a city wise campaign for a sku
+12 | one line verdict for this period
+12 | how is instamart ads doing overall
+13 | week on week change in spend impressions clicks gmv and roas
+13 | how did roas change vs last week
+13 | wow performance
+14 | what changed the most this week
+14 | top 3 changes this week
+15 | why is roas falling cost ctr conversion or lag
+15 | is the roas drop because of cpm or conversion
+16 | which days are still collecting sales
+16 | attribution lag days
+17 | what percent of spend has no sku
+17 | spend share of collection ads auto suggest and search inline banner
+18 | what is my a2s
+18 | is a2s above the ceiling
+19 | which campaigns spent the most but returned the least
+20 | which campaigns improved the most vs last week
+21 | if i can only do one thing today what is it
+22 | search queries with roas below 1
+22 | queries losing money
+23 | queries with spend but zero gmv
+23 | searches that got no revenue
+24 | top 20 wasteful search queries
+24 | worst search queries by spend
+25 | irrelevant searches i am paying for
+26 | searches with high ctr but poor conversion
+27 | queries that convert well but get low spend
+28 | new search queries this week
+29 | group search queries by theme and rank by roas
+30 | which spelling variants should be combined
+30 | khakra khakhra kakra combined
+31 | negative keyword list for this week
+32 | which queries deserve their own exact keyword
+33 | how much can i save by cutting wasteful queries
+34 | broad vs exact match comparison
+34 | compare broad and exact on cpc cpm roas
+35 | broad keywords spilling into irrelevant searches
+36 | what does broad match on snackible serve on
+36 | share of snackible broad spend that is truly brand
+37 | broad keywords serving competitor searches
+38 | healthy snacks exact vs broad
+39 | keywords to move from broad to exact
+40 | exact keywords with too few impressions
+41 | exact and broad versions competing
+42 | how much of choki choki broad went to other searches
+43 | share of spend on searches that do not contain the keyword
+44 | match type fix list
+45 | best match type for attack defend expand
+46 | cpm by placement
+46 | average cost per 1000 impressions by ad type
+47 | queries with the highest cpm
+48 | campaigns with high cpm and low ctr
+49 | cpm vs cpc campaigns cost per conversion
+50 | cpc campaigns paying too much per click
+51 | is collection ads worth its daily budget
+52 | keywords with high cpm and poor ad rank
+53 | paying for top rank without return
+54 | campaigns not spending full daily budget
+55 | has cpm gone up this week
+56 | cheapest cost per order by placement
+57 | where should i lower bids
+58 | rank cities by spend and roas
+58 | cities below break even
+59 | high spend weak roas cities
+60 | cities with strong roas but low spend
+61 | are bangalore and mumbai getting the right budget share
+62 | keywords wasting money in a city
+63 | cities with high cpm
+64 | cities that got worse this week
+65 | merge noida and noida 1
+66 | roas by city tier
+67 | which cities to cut hold or scale
+68 | rank skus by spend and roas
+69 | skus with heavy spend and weak roas
+70 | skus with strong roas to scale
+71 | skus advertised on searches that do not match
+72 | searches and cities driving a sku
+73 | skus with high ctr low conversion
+74 | are skus cannibalising each other
+75 | which skus should get more spend with stock
+76 | most wasteful sku and city combos
+77 | sku city match type grid
+78 | attack defend expand spend vs target
+79 | roas for each bucket by search served
+80 | how much defend spend landed on brand searches
+81 | which competitor keywords to keep or cut
+82 | how are too yum troovy lets try choki choki doing
+83 | closest competitors by conversion
+84 | is brand defence holding ad rank
+85 | is guaranteed top slot on brand efficient
+86 | expand keywords growth engines vs burning money
+87 | category keywords to add from converting searches
+88 | attack spend leaking into non competitor searches
+89 | scorecard for attack defend expand
+90 | campaigns that kept spending when availability was poor
+91 | sku city to pause until fill rate recovers
+92 | how much of the roas drop is availability
+93 | placements serving when out of stock
+94 | combine with fill rate data
+95 | i need to cut 50000 where from
+95 | cut 50k from the budget
+96 | i have extra 50000 where should it go
+96 | where to put an extra 50k
+97 | what did the extra spend bring back
+98 | at what spend does each keyword stop paying back
+99 | phase the rest of the months budget
+100 | pause reduce hold or scale table for campaigns
+101 | risks of following your recommendations
+102 | how will i know the changes worked
+103 | why did roas fall show me the chain of causes
+104 | is this a one off dip or structural
+105 | what looks good but is misleading
+106 | which recommendation are you least sure about
+107 | what data would change your recommendation
+108 | challenge my decision to raise spend
+109 | write a 5 line update for my founder
+110 | what principle should i take from this week
+111 | lets brainstorm how to grow revenue 30 percent without dropping roas
+111 | think with me on growing ads revenue
+59 | which cities are bleeding money
+59 | cities wasting my budget
+21 | what should we fix first
+21 | single most important thing to do today
+25 | are we wasting money on useless searches
+25 | pointless search terms eating my budget
+31 | which search terms should i block
+31 | what should i exclude from searches
+69 | which skus are performing worst
+69 | weakest skus by return
+20 | which campaigns got worse versus last week
+20 | campaigns that are underperforming compared to last week
+20 | campaigns declining week on week
+84 | is brand protection holding position
+84 | are we still ranking at the top for our own brand searches
+60 | which cities are underfunded
+60 | cities that deserve more budget
+60 | where am i under spending by city
+1 | keyword search queries pulling roas down
+1 | which keyword search queries pulled my roas down
+1 | search queries under a keyword dragging roas
+# ecom manager shorthand
+5 | top 3 moves for this week
+5 | priority actions for the week
+5 | my action list this week
+6 | tldr of my ads
+6 | summarise my ads performance
+7 | which campaigns can take more budget
+8 | attack defend expand share
+12 | am i winning or losing
+13 | wow comparison
+14 | biggest movers this week
+15 | whats pulling roas down
+19 | my biggest money burners
+21 | if i do one thing today
+22 | queries with roas less than 1
+22 | losing money queries
+23 | queries getting clicks but no sales
+24 | top 20 bleeders
+24 | biggest waste queries
+25 | garbage searches
+26 | high ctr poor cvr queries
+27 | hidden gems in queries
+28 | fresh queries this week
+31 | this weeks negative list
+31 | what to add to negatives
+34 | broad vs exact performance
+35 | broad spill
+39 | broad to exact candidates
+44 | match type cleanup
+46 | cpm per placement
+47 | priciest queries by cpm
+50 | overpriced cpc campaigns
+55 | has cpm risen
+57 | where should i cut bids
+58 | city league table
+59 | expensive cities with weak returns
+60 | cities i am under investing in
+66 | tier wise roas
+67 | city cut hold scale
+68 | sku league table
+69 | worst skus
+70 | skus to double down
+74 | sku cannibalisation
+78 | abe vs target
+84 | brand defend rank
+88 | attack leak
+95 | i must cut budget
+96 | i have extra budget
+98 | keyword payback curve
+99 | plan rest of month
+100 | pause hold scale sheet
+109 | 5 line founder update
+111 | growth brainstorm
