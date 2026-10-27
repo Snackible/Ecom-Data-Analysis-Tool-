@@ -218,6 +218,24 @@ def _find(text_norm: str, items, fuzzy=True, min_len=4, score=90):
     return out
 
 
+def _shorthand(text_norm: str, items, min_len: int = 3) -> list:
+    """Prefix/substring fallback for shorthand like 'KBA' -> every KBA_* campaign,
+    or 'ragi' -> every product whose name contains 'ragi'. Only fires for tokens
+    at least `min_len` characters long so common words are not swept up."""
+    hits = set()
+    tokens = [w for w in text_norm.split() if len(w) >= min_len and w not in _STOP]
+    for it in items:
+        if it is None:
+            continue
+        k = norm_text(it)
+        for w in tokens:
+            # whole-word substring match: 'kba' matches 'kba_attack_feb' at a token boundary
+            if re.search(r"(?<![a-z0-9])" + re.escape(w), k):
+                hits.add(it)
+                break
+    return sorted(hits)
+
+
 def extract_entities(text: str, cat: Catalog) -> dict:
     t = norm_text(text)
     quoted = re.findall(r"[\"']([^\"']{2,60})[\"']", str(text).replace("“", '"').replace("”", '"'))
@@ -230,6 +248,12 @@ def extract_entities(text: str, cat: Catalog) -> dict:
         "placements": _find(t, cat.placements, fuzzy=False),
         "quoted": quoted,
     }
+    # Shorthand fallback: if nothing matched the full name, try prefix/substring
+    # against the user's tokens so "KBA" or "ragi" still resolve to real values.
+    if not ents["campaigns"]:
+        ents["campaigns"] = _shorthand(t, cat.campaigns, min_len=3)
+    if not ents["products"]:
+        ents["products"] = _shorthand(t, cat.products, min_len=4)
     # a quoted phrase that is a known search query is a query filter
     ents["queries"] = [q for q in quoted if q in cat.queries]
     return ents

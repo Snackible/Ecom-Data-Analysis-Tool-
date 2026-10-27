@@ -116,3 +116,18 @@ def expanded_text(prev_text: str | None) -> str | None:
     dive runs again on it. The caller may lean on `prev` to inherit entities
     and period; the text itself is the previous one."""
     return prev_text or None
+
+
+def compound_summary(results) -> str:
+    """One-line roll-up over several sub-results, so a stacked answer still
+    reads as one thought. Pulls the headline of each and the kind."""
+    if not results or len(results) < 2:
+        return ""
+    heads = []
+    for r in results:
+        h = (r.headline or "").strip()
+        if h:
+            heads.append(h[:140])
+    if not heads:
+        return ""
+    return "Across your questions: " + " / ".join(heads)

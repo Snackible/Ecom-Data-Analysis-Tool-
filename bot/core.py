@@ -103,6 +103,7 @@ class Context:
         self.clf = Classifier.from_settings(self.settings)
         self._tables = None
         self._catalog = None
+        self._fetch_cache: dict = {}  # (table, dims, period, filters_key, extra, having, order, limit) -> (df.copy, rng)
 
     @classmethod
     def open(cls, settings: dict | None = None):
@@ -198,13 +199,22 @@ class Context:
     def fetch(self, table, dims=(), period=None, filters=None, extra="", having="",
               order="spend DESC", limit=None):
         """Aggregate base metrics grouped by whitelisted dims. Returns
-        (DataFrame with ratios, (min_date, max_date) actually covered)."""
+        (DataFrame with ratios, (min_date, max_date) actually covered).
+        Memoised per Context: deep-dive + manager read + follow-ups hit the
+        same slice several times inside one ask."""
         if not self.has_rows(table):
             return pd.DataFrame(), (None, None)
         dmap = DIMS[table]
         for d in dims:
             if d not in dmap:
                 raise KeyError(f"dimension not allowed: {d}")
+        per_key = (period.start, period.end, period.label) if period is not None else None
+        flt_key = tuple(sorted((k, tuple(v) if isinstance(v, (list, tuple)) else (v,)) for k, v in (filters or {}).items() if v))
+        cache_key = (table, tuple(dims), per_key, flt_key, extra, having, order, limit)
+        hit = self._fetch_cache.get(cache_key)
+        if hit is not None:
+            df, rng = hit
+            return df.copy(), rng
         wh, args = self.where(table, period, filters, extra)
         sel = ", ".join(f"{dmap[d]} AS {d}" for d in dims)
         grp = (" GROUP BY " + ", ".join(str(i + 1) for i in range(len(dims)))) if dims else ""
@@ -222,6 +232,7 @@ class Context:
             df["bidding"] = df["bidding"].map(clean_bidding)
         if "product" in df:
             df["product"] = df["product"].map(lambda x: short_sku(x, self.sku_map))
+        self._fetch_cache[cache_key] = (df.copy(), rng)
         return df, rng
 
     def totals(self, table, period=None, filters=None, extra=""):
