@@ -2,7 +2,7 @@
 import re
 from datetime import date
 
-from . import deepdive, flex, matcher as matcher_mod, q_cost, queries
+from . import deepdive, flex, intents, matcher as matcher_mod, multi, q_cost, queries
 from .core import Context, Params, Result, empty_result
 from .params import Period, extract_entities, extract_top_n, parse_dates
 
@@ -121,6 +121,16 @@ def ask(text: str, settings: dict | None = None, log: bool = True, log_path=None
     text = (text or "").strip()
     if not text:
         return Result(headline="Ask me something about the Instamart ads data.", kind="unknown")
+    # Dependent follow-ups rewrite the text against the previous question
+    # before anything else sees it: "why?" / "break it down" / "and roas?".
+    if prev:
+        if multi.is_why(text) or multi.is_expand(text):
+            orig = text
+            text = prev.get("text") or text
+        else:
+            swap = multi.metric_swap(text, prev.get("text"))
+            if swap:
+                text = swap
     ctx = Context.open(settings)
     try:
         if not (ctx.has_rows("granular") or ctx.has_rows("search_query")):
@@ -146,6 +156,9 @@ def ask(text: str, settings: dict | None = None, log: bool = True, log_path=None
             elif m.route == "bank" and m.qn is not None:
                 qn, handled, route = m.qn, "bank", "bank"
                 res = queries.run_question(ctx, p, m.qn)
+            elif (iq := intents.detect(text)) is not None:
+                qn, handled, route = iq, "intent", "bank"
+                res = queries.run_question(ctx, p, iq)
             elif m.route == "flex" or _in_domain(text, p):
                 handled, route = "flex", "flex"
                 res = flex.run(ctx, p, text)
@@ -181,3 +194,20 @@ def ask(text: str, settings: dict | None = None, log: bool = True, log_path=None
         return res
     finally:
         ctx.close()
+
+
+def ask_many(text: str, settings: dict | None = None, log: bool = True, prev: dict | None = None) -> list[Result]:
+    """Split a compound message into sub-questions and answer each. Returns at
+    least one Result; the UI shows them stacked. A single-question message
+    returns a one-element list, so callers can treat the two cases the same.
+    `prev` carries into the first sub-question; later sub-questions chain off
+    the one before them so 'and roas?' at the end still works."""
+    parts = multi.split_compound(text)
+    out: list[Result] = []
+    carry = prev
+    for part in parts:
+        r = ask(part, settings=settings, log=log, prev=carry)
+        out.append(r)
+        if r.meta:
+            carry = r.meta
+    return out

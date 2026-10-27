@@ -39,11 +39,7 @@ def _chips(items, prefix):
             st.rerun()
 
 
-def _show(msg: dict, idx: int = 0, latest: bool = False):
-    s = msg.get("struct")
-    if not s:
-        st.markdown(msg.get("content", ""))
-        return
+def _show_one(s: dict, idx: int, part: int, latest: bool, with_chips: bool):
     if s["date"]:
         st.caption(f"📅 {s['date']}")
     if s["head"]:
@@ -64,16 +60,32 @@ def _show(msg: dict, idx: int = 0, latest: bool = False):
     if s["tables"]:
         with st.expander("Supporting numbers"):
             st.markdown(s["tables"])
-    if latest and s["suggestions"]:
+    if latest and with_chips and s["suggestions"]:
         st.caption("Ask next")
-        _chips(s["suggestions"], f"sug{idx}")
+        _chips(s["suggestions"], f"sug{idx}_{part}")
+
+
+def _show(msg: dict, idx: int = 0, latest: bool = False):
+    structs = msg.get("structs")
+    if structs is None:
+        s = msg.get("struct")
+        if not s:
+            st.markdown(msg.get("content", ""))
+            return
+        structs = [s]
+    for i, s in enumerate(structs):
+        if len(structs) > 1:
+            st.markdown(f"**Part {i + 1} of {len(structs)}**")
+        _show_one(s, idx, i, latest=latest, with_chips=(i == len(structs) - 1))
+        if i < len(structs) - 1:
+            st.markdown("---")
 
 
 def render():
     st.subheader("💅 Snack Diva")
-    st.caption("Ask in plain English. Answers are written from the loaded Instamart ads data and computed locally "
-               "(no external AI service). Every answer is a deep dive: what, why, how, whom, similarity, cause and what to do next. "
-               "You can follow up, for example: \"and for Mumbai?\" or \"top 20 instead\".")
+    st.caption("Ask in plain English. Follow-ups like \"why?\", \"and ROAS?\", \"and for Mumbai?\" and compound questions "
+               "like \"which city spends most and which SKUs are weak\" all work. Every answer is a deep dive: what, why, "
+               "how, whom, similarity, cause and what to do next. All computed locally from the loaded Instamart ads data.")
     if HISTORY_KEY not in st.session_state:
         st.session_state[HISTORY_KEY] = []
     hist = st.session_state[HISTORY_KEY]
@@ -106,11 +118,12 @@ def render():
         with st.chat_message("assistant"):
             with st.spinner("Working it out from the data..."):
                 try:
-                    res = engine.ask(prompt, prev=st.session_state.get(PREV_KEY))
-                    struct = answers.render_struct(res)
-                    if res.meta:
-                        st.session_state[PREV_KEY] = res.meta
-                    msg = {"role": "assistant", "struct": struct}
+                    results = engine.ask_many(prompt, prev=st.session_state.get(PREV_KEY))
+                    structs = [answers.render_struct(r) for r in results]
+                    for r in results:
+                        if r.meta:
+                            st.session_state[PREV_KEY] = r.meta
+                    msg = {"role": "assistant", "structs": structs}
                 except Exception:
                     msg = {"role": "assistant", "content": "Something went wrong answering that. Try rephrasing it."}
             hist.append(msg)

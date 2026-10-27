@@ -163,3 +163,59 @@
 60 | which cities are underfunded
 60 | cities that deserve more budget
 60 | where am i under spending by city
+1 | keyword search queries pulling roas down
+1 | which keyword search queries pulled my roas down
+1 | search queries under a keyword dragging roas
+# ecom manager shorthand
+5 | top 3 moves for this week
+5 | priority actions for the week
+5 | my action list this week
+6 | tldr of my ads
+6 | summarise my ads performance
+7 | which campaigns can take more budget
+8 | attack defend expand share
+12 | am i winning or losing
+13 | wow comparison
+14 | biggest movers this week
+15 | whats pulling roas down
+19 | my biggest money burners
+21 | if i do one thing today
+22 | queries with roas less than 1
+22 | losing money queries
+23 | queries getting clicks but no sales
+24 | top 20 bleeders
+24 | biggest waste queries
+25 | garbage searches
+26 | high ctr poor cvr queries
+27 | hidden gems in queries
+28 | fresh queries this week
+31 | this weeks negative list
+31 | what to add to negatives
+34 | broad vs exact performance
+35 | broad spill
+39 | broad to exact candidates
+44 | match type cleanup
+46 | cpm per placement
+47 | priciest queries by cpm
+50 | overpriced cpc campaigns
+55 | has cpm risen
+57 | where should i cut bids
+58 | city league table
+59 | expensive cities with weak returns
+60 | cities i am under investing in
+66 | tier wise roas
+67 | city cut hold scale
+68 | sku league table
+69 | worst skus
+70 | skus to double down
+74 | sku cannibalisation
+78 | abe vs target
+84 | brand defend rank
+88 | attack leak
+95 | i must cut budget
+96 | i have extra budget
+98 | keyword payback curve
+99 | plan rest of month
+100 | pause hold scale sheet
+109 | 5 line founder update
+111 | growth brainstorm
