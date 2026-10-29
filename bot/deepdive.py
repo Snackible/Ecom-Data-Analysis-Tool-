@@ -1,4 +1,4 @@
-"""Snack Diva deep dive: WHAT / WHY / HOW / WHOM / SIMILARITY / CAUSE / RECOMMENDATION.
+"""Snackibella deep dive: WHAT / WHY / HOW / WHOM / SIMILARITY / CAUSE / RECOMMENDATION.
 
 For the subject of an answer (a named city, keyword, SKU, campaign, placement or
 search query, else the top row of the first table, else the whole account) this

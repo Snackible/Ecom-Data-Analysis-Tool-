@@ -1,4 +1,4 @@
-"""Streamlit chat tab for Snack Diva (the Ads Bot). Fully local: no external API or LLM."""
+"""Streamlit chat tab for Snackibella (the Ads Bot). Fully local: no external API or LLM."""
 import streamlit as st
 
 from . import alerts, answers, engine, multi, settings as settings_mod, sku_learn
@@ -260,7 +260,7 @@ def _run_alerts_once():
 
 
 def render():
-    st.subheader("💅 Snack Diva")
+    st.subheader("💅 Snackibella")
     st.caption("Ask in plain English. Follow-ups like \"why?\", \"and ROAS?\", \"and for Mumbai?\" and compound questions "
                "like \"which city spends most and which SKUs are weak\" all work. Every answer is a deep dive: what, why, "
                "how, whom, similarity, cause and what to do next. All computed locally from the loaded Instamart ads data.")
@@ -297,7 +297,7 @@ def render():
         with st.chat_message(m["role"]):
             _show(m, i, latest=(i == last_assistant))
 
-    prompt = st.chat_input("Ask Snack Diva about the Instamart ads data") or st.session_state.pop(PENDING_KEY, None)
+    prompt = st.chat_input("Ask Snackibella about the Instamart ads data") or st.session_state.pop(PENDING_KEY, None)
     if prompt:
         hist.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
