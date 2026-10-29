@@ -76,6 +76,28 @@ class SchemaError(Exception):
     """Raised when a CSV's columns don't match what the dashboard expects."""
 
 
+def _sniff_type(path: Path):
+    """Fallback when the filename says nothing: read the header row. Only the
+    column names decide, never the values. None when it is not a plain CSV or
+    the header matches nothing."""
+    if path.suffix.lower() not in (".csv", ".gz"):
+        return None
+    try:
+        with _open_csv(path) as f:
+            head = [next(f, "") for _ in range(PREAMBLE_LINES + 4)]
+    except (OSError, UnicodeDecodeError):
+        return None
+    for line in head:
+        cols = {c.strip().strip('"').upper() for c in line.split(",")}
+        if "SEARCH_QUERY" in cols and "TOTAL_IMPRESSIONS" in cols:
+            return "search_query"
+        if "METRICS_DATE" in cols and "CITY" in cols and "TOTAL_IMPRESSIONS" in cols:
+            return "granular"
+        if "CAMPAIGN_START_DATE" in cols and "CITY_COUNT" in cols and "METRICS_DATE" not in cols:
+            return "summary"
+    return None
+
+
 def detect_file_type(path: Path) -> str:
     name = path.name.upper()
     if "SEARCH_QUERY" in name:
@@ -84,6 +106,9 @@ def detect_file_type(path: Path) -> str:
         return "summary"
     if "GRANULAR" in name:
         return "granular"
+    sniffed = _sniff_type(path)
+    if sniffed:
+        return sniffed
     raise SchemaError(
         f"{path.name}: can't tell if this is a summary, granular, or search "
         f'query export - expected the filename to contain "SUMMARY", '

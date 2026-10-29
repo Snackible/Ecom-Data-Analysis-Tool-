@@ -186,3 +186,22 @@ def test_entity_extraction_with_typos():
     assert e["cities"] == ["Mumbai"]
     e = params.extract_entities("which search queries did 'ragi chips' serve on", cat)
     assert e["queries"] == ["ragi chips"]
+
+
+def test_detect_file_type_falls_back_to_header(tmp_path):
+    import ingest
+    hdr = ",".join(ingest.SEARCH_QUERY_COLUMNS)
+    f = tmp_path / "aug search_12325_1793268134870.csv"
+    f.write_text("a\n" * 6 + hdr + "\n", encoding="utf-8")
+    assert ingest.detect_file_type(f) == "search_query"
+    g = tmp_path / "aug stuff.csv"
+    g.write_text("a\n" * 6 + ",".join(ingest.GRANULAR_COLUMNS) + "\n", encoding="utf-8")
+    assert ingest.detect_file_type(g) == "granular"
+    s = tmp_path / "aug totals.csv"
+    s.write_text("a\n" * 6 + ",".join(ingest.SUMMARY_COLUMNS) + "\n", encoding="utf-8")
+    assert ingest.detect_file_type(s) == "summary"
+    junk = tmp_path / "notes.csv"
+    junk.write_text("hello,world\n", encoding="utf-8")
+    import pytest
+    with pytest.raises(ingest.SchemaError):
+        ingest.detect_file_type(junk)
