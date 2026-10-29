@@ -1,0 +1,7 @@
+duckdb
+pandas
+openpyxl
+rapidfuzz
+pyyaml
+mcp>=1.9
+uvicorn
