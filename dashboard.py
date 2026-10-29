@@ -406,8 +406,8 @@ st.title("Instamart Ads Dashboard")
 # --- Upload panel ------------------------------------------------------------
 with st.expander("📤 Upload new CSV/Excel exports", expanded=not config.DB_PATH.exists()):
     uploaded_files = st.file_uploader(
-        "Drop IM_SUMMARY_*/IM_GRANULAR_*/IM_..._SEARCH_QUERY_* files here, .csv or .xlsx "
-        "(filename must contain SUMMARY, GRANULAR, or SEARCH_QUERY)",
+        "Drop the Instamart summary, granular or search query exports here, .csv or .xlsx "
+        "(any filename; the type is read from the columns). Upload one or two at a time.",
         type=["csv", "xlsx", "xls"], accept_multiple_files=True,
     )
     if uploaded_files and st.button("Ingest uploaded files"):
