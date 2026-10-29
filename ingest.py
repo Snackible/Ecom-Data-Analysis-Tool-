@@ -99,6 +99,11 @@ def _sniff_type(path: Path):
 
 
 def detect_file_type(path: Path) -> str:
+    """Header columns decide for CSVs; the filename is only the fallback (Excel
+    files, or a CSV whose header matches none of the three layouts)."""
+    sniffed = _sniff_type(path)
+    if sniffed:
+        return sniffed
     name = path.name.upper()
     if "SEARCH_QUERY" in name:
         return "search_query"
@@ -106,14 +111,9 @@ def detect_file_type(path: Path) -> str:
         return "summary"
     if "GRANULAR" in name:
         return "granular"
-    sniffed = _sniff_type(path)
-    if sniffed:
-        return sniffed
     raise SchemaError(
-        f"{path.name}: can't tell if this is a summary, granular, or search "
-        f'query export - expected the filename to contain "SUMMARY", '
-        f'"GRANULAR", or "SEARCH_QUERY" (e.g. IM_SUMMARY_....csv / '
-        f"IM_GRANULAR_....csv / IM_..._SEARCH_QUERY_....csv)."
+        f"{path.name}: couldn't tell if this is a summary, granular, or search "
+        f"query export from its columns. Check it is the unmodified Instamart export."
     )
 
 
