@@ -205,3 +205,25 @@ def test_detect_file_type_falls_back_to_header(tmp_path):
     import pytest
     with pytest.raises(ingest.SchemaError):
         ingest.detect_file_type(junk)
+
+
+def test_extract_zip_keeps_only_exports_and_flat_names(tmp_path):
+    import zipfile, pytest, ingest
+    z = tmp_path / "x.zip"
+    with zipfile.ZipFile(z, "w") as zf:
+        zf.writestr("a/b/one.csv", "h\n1\n")
+        zf.writestr("../evil.csv", "h\n2\n")
+        zf.writestr("notes.txt", "no")
+        zf.writestr("__MACOSX/._one.csv", "x")
+    out_dir = tmp_path / "out"; out_dir.mkdir()
+    got = ingest.extract_zip(z, out_dir)
+    assert sorted(p.name for p in got) == ["evil.csv", "one.csv"]
+    assert all(p.parent == out_dir for p in got) and not (tmp_path / "evil.csv").exists()
+    empty = tmp_path / "e.zip"
+    with zipfile.ZipFile(empty, "w") as zf:
+        zf.writestr("n.txt", "x")
+    with pytest.raises(ingest.SchemaError):
+        ingest.extract_zip(empty, out_dir)
+    bad = tmp_path / "b.zip"; bad.write_bytes(b"nope")
+    with pytest.raises(ingest.SchemaError):
+        ingest.extract_zip(bad, out_dir)

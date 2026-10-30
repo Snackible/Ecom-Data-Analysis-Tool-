@@ -407,17 +407,28 @@ st.title("Instamart Ads Dashboard")
 with st.expander("📤 Upload new CSV/Excel exports", expanded=not config.DB_PATH.exists()):
     uploaded_files = st.file_uploader(
         "Drop the Instamart summary, granular or search query exports here, .csv or .xlsx "
-        "(any filename; the type is read from the columns). Upload one or two at a time.",
-        type=["csv", "xlsx", "xls"], accept_multiple_files=True,
+        "(any filename; the type is read from the columns). Second way: put several exports in one .zip and upload that, it is one request instead of many.",
+        type=["csv", "xlsx", "xls", "zip"], accept_multiple_files=True,
     )
     if uploaded_files and st.button("Ingest uploaded files"):
         config.INCOMING_DIR.mkdir(parents=True, exist_ok=True)
         config.DB_PATH.parent.mkdir(parents=True, exist_ok=True)
         saved_paths = []
         conversion_failed = False
+        staged = []
         for f in uploaded_files:
             dest = config.INCOMING_DIR / f.name
             dest.write_bytes(f.getvalue())
+            if dest.suffix.lower() == ".zip":
+                try:
+                    staged += ingest.extract_zip(dest, config.INCOMING_DIR)
+                except ingest.SchemaError as exc:
+                    st.error(str(exc))
+                    conversion_failed = True
+                dest.unlink()
+            else:
+                staged.append(dest)
+        for dest in staged:
             if dest.suffix.lower() in (".xlsx", ".xls"):
                 try:
                     csv_dest = ingest.convert_excel_to_csv(dest)

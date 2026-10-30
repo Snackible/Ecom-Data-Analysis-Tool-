@@ -151,6 +151,35 @@ def parse_preamble(path: Path) -> tuple[date, date]:
     return from_date, to_date
 
 
+def extract_zip(zip_path: Path, dest_dir: Path, max_bytes: int = 400 * 1024 * 1024) -> list[Path]:
+    """Unpack the .csv/.xlsx/.xls exports from a zip into dest_dir. Only the
+    member's base name is used (no folders, no path tricks), anything else in
+    the zip is ignored, and the total unpacked size is capped."""
+    import zipfile
+    out, total = [], 0
+    try:
+        zf = zipfile.ZipFile(zip_path)
+    except zipfile.BadZipFile as exc:
+        raise SchemaError(f"{zip_path.name}: not a valid zip file") from exc
+    with zf:
+        for info in zf.infolist():
+            base = Path(info.filename).name
+            if info.is_dir() or not base or base.startswith(("._", ".")) or "__MACOSX" in info.filename:
+                continue
+            if Path(base).suffix.lower() not in (".csv", ".xlsx", ".xls"):
+                continue
+            total += info.file_size
+            if total > max_bytes:
+                raise SchemaError(f"{zip_path.name}: unpacks to more than {max_bytes // 2**20}MB, upload it in smaller zips")
+            dest = dest_dir / base
+            with zf.open(info) as src, open(dest, "wb") as dst:
+                dst.write(src.read())
+            out.append(dest)
+    if not out:
+        raise SchemaError(f"{zip_path.name}: no .csv or .xlsx files inside")
+    return out
+
+
 def convert_excel_to_csv(path: Path) -> Path:
     """Convert an uploaded .xlsx/.xls export to a plain CSV with the same
     layout DuckDB's read_csv expects (metadata preamble + header + rows),
