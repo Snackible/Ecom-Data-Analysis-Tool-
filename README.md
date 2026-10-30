@@ -222,3 +222,22 @@ Nothing changes for the bot. Load the new `IM_GRANULAR_*`, `IM_CAMPAIGN_X_SEARCH
 - ROAS is `total_gmv / spend` and is at MRP, so it overstates real revenue. CPM is spend per 1,000 impressions, not the report's `ecpm`. Ratios are recomputed from totals, never averaged.
 - `Noida` and `Noida 1` are merged in city views; other possible duplicate city names are flagged, not merged.
 - Before analysis the bot checks that granular and search_query agree for search placements and shows a warning if they do not. A summary file whose period does not overlap the granular dates is reported as not comparable, not as a mismatch.
+
+## Snackibella in Claude (MCP server)
+
+`mcp_server.py` exposes Snackibella to Claude as three tools: `ask_snackibella` (plain-English questions, compact answers), `data_overview` (tables, date ranges, columns) and `run_sql` (one read-only SELECT, 200 rows max, external file access off). It reads the same data as the dashboard (rebuilt from `data/processed/*.csv.gz` on start) and makes no LLM calls, so Claude only spends tokens reading the short replies.
+
+**Deploy (Render):** the `snackibella-mcp` service in `render.yaml` (build `pip install -r requirements-mcp.txt`, start `python mcp_server.py`). Set `MCP_TOKEN` to a long random string in the Render dashboard. Endpoint: `https://<service>.onrender.com/mcp`, every request needs `Authorization: Bearer <MCP_TOKEN>`.
+
+**Connect Claude Desktop** (Settings > Developer > Edit config, needs Node for `mcp-remote`):
+
+```json
+{ "mcpServers": { "snackibella": {
+    "command": "npx",
+    "args": ["-y", "mcp-remote", "https://<service>.onrender.com/mcp", "--header", "Authorization: Bearer ${MCP_TOKEN}"],
+    "env": { "MCP_TOKEN": "<the token>" } } } }
+```
+
+**Connect Claude Code:** `claude mcp add --transport http snackibella https://<service>.onrender.com/mcp --header "Authorization: Bearer <the token>"`
+
+**Notes:** new uploads reach this service only after it redeploys (it rebuilds from git); the free tier sleeps, so the first call after idle is slow; run locally with `python mcp_server.py --stdio` for a same-machine setup.

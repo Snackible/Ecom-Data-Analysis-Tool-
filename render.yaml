@@ -7,3 +7,14 @@ services:
     envVars:
       - key: DASHBOARD_PASSWORD
         sync: false
+
+  # Snackibella as an MCP server for Claude. Same repo, same archived data
+  # (rebuilt on start), no Streamlit. Set MCP_TOKEN in the Render dashboard.
+  - type: web
+    name: snackibella-mcp
+    env: python
+    buildCommand: pip install -r requirements-mcp.txt
+    startCommand: python mcp_server.py
+    envVars:
+      - key: MCP_TOKEN
+        sync: false
